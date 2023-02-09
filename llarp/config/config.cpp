@@ -533,6 +533,21 @@ namespace llarp
           m_ExitAuths.emplace(exit, auth);
         });
 
+        
+    conf.defineOption<bool>(
+        "network",
+        "auto-routing",
+        ClientOnly,
+        Default{true},
+        Comment{
+            "enable / disable auto routing. When using an exit belnet will add routes to "
+            "the OS to make traffic go over the network interface via belnet.",
+            "enabled by default.",
+        },
+        AssignmentAcceptor(m_EnableRoutePoker));
+
+
+
     conf.defineOption<std::string>(
         "network",
         "ifname",
