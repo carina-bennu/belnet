@@ -43,7 +43,7 @@ You can install these using:
 
 If you are not on a platform supported by the debian packages or if you want to build a dev build, this is the most "portable" way to do it:
 
-    $ sudo apt install build-essential cmake git libcap-dev pkg-config automake libtool libuv1-dev libsodium-dev libzmq3-dev libcurl4-openssl-dev libevent-dev nettle-dev libunbound-dev libsqlite3-dev
+    $ sudo apt install build-essential cmake git libcap-dev pkg-config automake libtool libuv1-dev libsodium-dev libzmq3-dev libcurl4-openssl-dev libevent-dev nettle-dev libunbound-dev libsqlite3-dev libssl-dev
     $ git clone --recursive https://github.com/Beldex-Coin/belnet
     $ cd belnet
     $ mkdir build
