@@ -129,6 +129,8 @@ namespace llarp
 
     std::optional<fs::path> m_AddrMapPersistFile;
 
+    bool m_EnableRoutePoker;
+
     void
     defineConfigOptions(ConfigDefinition& conf, const ConfigGenParameters& params);
   };
@@ -147,7 +149,7 @@ namespace llarp
   {
     struct LinkInfo
     {
-      std::string interface;
+      std::string m_interface;
       int addressFamily = -1;
       uint16_t port = -1;
     };

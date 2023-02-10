@@ -87,6 +87,12 @@ namespace llarp
 
   RoutePoker::~RoutePoker()
   {
+
+    if (m_Router == nullptr)
+      return;
+    if (m_Router->GetVPNPlatform() == nullptr)
+      return;
+      
     vpn::IRouteManager& route = m_Router->GetVPNPlatform()->RouteManager();
     for (const auto& [ip, gateway] : m_PokedRoutes)
     {
@@ -162,10 +168,13 @@ namespace llarp
     if (m_Enabled)
       return;
 
-    m_Enabling = true;
-    Update();
-    m_Enabling = false;
-    m_Enabled = true;
+    if (m_Router->GetConfig()->network.m_EnableRoutePoker)
+    {
+      m_Enabling = true;
+      Update();
+      m_Enabling = false;
+      m_Enabled = true;
+    }
 
     systemd_resolved_set_dns(
         m_Router->hiddenServiceContext().GetDefault()->GetIfName(),
@@ -191,6 +200,10 @@ namespace llarp
   void
   RoutePoker::Up()
   {
+
+    if (not m_Router->GetConfig()->network.m_EnableRoutePoker)
+      return;
+
     vpn::IRouteManager& route = m_Router->GetVPNPlatform()->RouteManager();
 
     // black hole all routes by default
@@ -207,6 +220,10 @@ namespace llarp
   void
   RoutePoker::Down()
   {
+
+    if (not m_Router->GetConfig()->network.m_EnableRoutePoker)
+      return;
+
     // unpoke routes for first hops
     m_Router->ForEachPeer(
         [&](auto session, auto) mutable { DelRoute(session->GetRemoteEndpoint().asIPv4()); },

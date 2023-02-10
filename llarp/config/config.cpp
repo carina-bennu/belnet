@@ -454,6 +454,7 @@ namespace llarp
         "network",
         "exit-node",
         ClientOnly,
+        MultiValue,
         Comment{
             "Specify a `.bdx` address and an optional ip range to use as an exit broker.",
             "Example:",
@@ -496,12 +497,13 @@ namespace llarp
         "network",
         "exit-auth",
         ClientOnly,
+        MultiValue,
         Comment{
             "Specify an optional authentication code required to use a non-public exit node.",
             "For example:",
             "    exit-auth=myfavouriteexit.bdx:abc",
             "uses the authentication code `abc` whenever myfavouriteexit.bdx is accessed.",
-            "Can be specified multiple time to store codes for different exit nodes.",
+            "Can be specified multiple times to store codes for different exit nodes.",
         },
         [this](std::string arg) {
           if (arg.empty())
@@ -530,6 +532,21 @@ namespace llarp
           }
           m_ExitAuths.emplace(exit, auth);
         });
+
+        
+    conf.defineOption<bool>(
+        "network",
+        "auto-routing",
+        ClientOnly,
+        Default{true},
+        Comment{
+            "enable / disable auto routing. When using an exit belnet will add routes to "
+            "the OS to make traffic go over the network interface via belnet.",
+            "enabled by default.",
+        },
+        AssignmentAcceptor(m_EnableRoutePoker));
+
+
 
     conf.defineOption<std::string>(
         "network",
@@ -798,12 +815,12 @@ namespace llarp
       const IpAddress addr{value};
       if (not addr.hasPort())
         throw std::invalid_argument("no port provided in link address");
-      info.interface = addr.toHost();
+      info.m_interface = addr.toHost();
       info.port = *addr.getPort();
     }
     else
     {
-      info.interface = std::string{name};
+      info.m_interface = std::string{name};
 
       std::vector<std::string_view> splits = split(value, ",");
       for (std::string_view str : splits)

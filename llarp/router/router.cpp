@@ -725,7 +725,7 @@ namespace llarp
           util::memFn(&AbstractRouter::TriggerPump, this),
           util::memFn(&AbstractRouter::QueueWork, this));
 
-      const std::string& key = serverConfig.interface;
+      const std::string& key = serverConfig.m_interface;
       int af = serverConfig.addressFamily;
       uint16_t port = serverConfig.port;
       if (!server->Configure(this, key, af, port))
@@ -838,12 +838,18 @@ namespace llarp
       else
       {
         ss << " client | known/connected: " << nodedb()->NumLoaded() << "/"
-           << NumberOfConnectedRouters() << " | path success: ";
-        hiddenServiceContext().ForEachService([&ss](const auto& name, const auto& ep) {
-          ss << " [" << name << " " << std::setprecision(4)
-             << (100.0 * ep->CurrentBuildStats().SuccessRatio()) << "%]";
-          return true;
-        });
+           << NumberOfConnectedRouters();
+        if (auto ep = hiddenServiceContext().GetDefault())
+        {
+          ss << " | paths/endpoints " << pathContext().CurrentOwnedPaths() << "/"
+             << ep->UniqueEndpoints();
+          auto success_rate = ep->CurrentBuildStats().SuccessRatio();
+          if (success_rate < 0.5)
+          {
+            ss << " [ !!! Low Build Success Rate (" << std::setprecision(4)
+               << (100.0 * success_rate) << "%) !!! ] ";
+          }
+        };
       }
       const auto status = ss.str();
       ::sd_notify(0, status.c_str());
@@ -1257,10 +1263,7 @@ namespace llarp
 
     LogInfo("have ", _nodedb->NumLoaded(), " routers");
 
-#ifdef _WIN32
-    // windows uses proactor event loop so we need to constantly pump
-    _loop->add_ticker([this] { PumpLL(); });
-#endif
+
     _loop->call_every(ROUTER_TICK_INTERVAL, weak_from_this(), [this] { Tick(); });
     _running.store(true);
     _startedAt = Now();
