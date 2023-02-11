@@ -61,6 +61,7 @@ option(TRACY_ROOT "include tracy profiler source" OFF)
 option(WITH_TESTS "build unit tests" OFF)
 option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
+option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
 
 include(cmake/enable_lto.cmake)
 
