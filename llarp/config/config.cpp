@@ -547,6 +547,17 @@ namespace llarp
         AssignmentAcceptor(m_EnableRoutePoker));
 
 
+    conf.defineOption<bool>(
+        "network",
+        "blackhole-routes",
+        ClientOnly,
+        Default{true},
+        Comment{
+            "Enable / disable route configuration blackholes.",
+            "When enabled belnet will drop ip4 and ip6 not included in exit config.",
+            "Enabled by default."},
+        AssignmentAcceptor(m_BlackholeRoutes));
+
 
     conf.defineOption<std::string>(
         "network",

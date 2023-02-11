@@ -166,6 +166,16 @@ namespace llarp
       SigINT();
     }
 #ifndef _WIN32
+    
+    if (sig == SIGUSR1)
+    {
+      if (router and not router->IsMasterNode())
+      {
+        LogInfo("SIGUSR1: resetting network state");
+        router->Thaw();
+      }
+    }
+
     if (sig == SIGHUP)
     {
       Reload();
