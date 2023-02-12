@@ -53,6 +53,9 @@ extern "C"
   int EXPORT
   belnet_inbound_stream(uint16_t port, struct belnet_context* context);
 
+  void EXPORT
+  belnet_close_stream(int stream_id, struct belnet_context* context);
+
 #ifdef __cplusplus
 }
 #endif

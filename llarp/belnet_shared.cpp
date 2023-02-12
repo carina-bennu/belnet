@@ -10,6 +10,8 @@
 #include <llarp/quic/tunnel.hpp>
 #include <llarp/nodedb.hpp>
 
+#include <llarp/util/logging/buffer.hpp>
+
 #include <mutex>
 
 #ifdef _WIN32
@@ -230,18 +232,41 @@ extern "C"
   int EXPORT
   belnet_add_bootstrap_rc(const char* data, size_t datalen, struct belnet_context* ctx)
   {
+    if (data == nullptr or datalen == 0)
+      return -3;
     llarp_buffer_t buf{data, datalen};
-    llarp::RouterContact rc{};
     if (ctx == nullptr)
       return -3;
     auto lock = ctx->acquire();
     // add a temp cryptography implementation here so rc.Verify works
     llarp::CryptoManager instance{new llarp::sodium::CryptoLibSodium{}};
-    if (not rc.BDecode(&buf))
-      return -1;
-    if (not rc.Verify(llarp::time_now_ms()))
-      return -2;
-    ctx->config->bootstrap.routers.insert(std::move(rc));
+    if (data[0] == 'l')
+    {
+      if(not ctx->config->bootstrap.routers.BDecode(&buf))
+      {
+        llarp::LogError("Cannot decode bootstrap list: ", llarp::buffer_printer{buf});
+        return -1;
+      }
+        
+      for(const auto& rc : ctx->config->bootstrap.routers)
+      {
+        if (not rc.Verify(llarp::time_now_ms()))
+          return -2;
+      }
+    }
+    else
+    {
+      llarp::RouterContact rc{};
+      if (not rc.BDecode(&buf))
+      {
+        llarp::LogError("failed to decode signle RC: ", llarp::buffer_printer{buf});
+        return -1;
+      }
+        
+      if (not rc.Verify(llarp::time_now_ms()))
+        return -2;
+      ctx->config->bootstrap.routers.insert(std::move(rc));
+    }
     return 0;
   }
 
