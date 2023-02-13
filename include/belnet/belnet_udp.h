@@ -14,9 +14,9 @@ extern "C"
     /// the socket id for this flow used for i/o purposes and closing this socket
     int socket_id;
     /// remote endpoint's .bdx or .mnode address
-    char remote_addr[256];
+    char remote_host[256];
     /// remote endpont's port
-    int remote_port;
+    uint16_t remote_port;
     
   };
 
@@ -33,12 +33,18 @@ extern "C"
     void* /*user*/, 
     const struct belnet_udp_flowinfo* /* remote address */, 
     void** /* flow-userdata */, 
-    int* /* timeout */);
+    int* /* timeout seconds*/);
+
+
+
+    /// callback to make a new outbound flow
+  typedef void(belnet_udp_create_flow_func)(
+    void* /*userdata*/, void** /*flow userdata*/, int* /* flowtimeout */);
 
   /// hook function for handling packets
   typedef void (*belnet_udp_flow_recv_func)(
     const struct belnet_udp_flowinfo* /* remote address */, 
-    char* /* data pointer */, 
+    const char* /* data pointer */, 
     size_t /* data length */, 
     void* /* flow-userdata */);
 
@@ -63,16 +69,20 @@ extern "C"
   /// @returns nonzero on error in which it is an errno value
   int EXPORT
   belnet_udp_bind(
-      int exposedPort,
+      uint16_t exposedPort,
       belnet_udp_flow_filter filter,
       belnet_udp_flow_recv_func recv,
       belnet_udp_flow_timeout_func timeout,
       void* user,
-      struct belnet_udp_listen_result* result,
+      struct belnet_udp_bind_result* result,
       struct belnet_context* ctx);
 
 
   /// @brief establish a udp flow to remote endpoint
+  ///
+  /// @param create_flow the callback to create the new flow if we establish one
+  ///
+  /// @param user passed to new_flow as user data
   ///
   /// @param remote the remote address to establish to
   ///
@@ -80,7 +90,11 @@ extern "C"
   ///
   /// @return 0 on success, non zero errno on fail
   int EXPORT
-  belnet_udp_establish(const struct belnet_udp_flowinfo* remote, struct belnet_context* ctx);
+  belnet_udp_establish(
+      belnet_udp_create_flow_func create_flow,
+      void* user,
+      const struct belnet_udp_flowinfo* remote,
+      struct belnet_context* ctx);
 
   /// @brief send on an established flow to remote endpoint
   ///
@@ -98,7 +112,16 @@ extern "C"
       const struct belnet_udp_flowinfo* remote,
       const void* ptr,
       size_t len,
-      struct belnet_ctx* ctx);
+      struct belnet_context* ctx);
+
+  /// @brief close a bound udp socket
+  /// closes all flows immediately
+  ///
+  /// @param socket_id the bound udp socket's id
+  ///
+  /// @param ctx belnet context
+  void EXPORT
+  belnet_udp_close(int socket_id, struct belnet_context* ctx);
 
 
 

@@ -21,6 +21,11 @@ extern "C"
   int EXPORT
   belnet_log_level(const char*);
 
+  /// @brief take in hex and turn it into base32z
+  /// @return value must be free()'d later
+  char* EXPORT
+  belnet_hex_to_base32z(const char* hex);
+
 #ifdef __cplusplus
 }
 #endif
