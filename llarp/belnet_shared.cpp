@@ -1,7 +1,7 @@
 
 
-#include "belnet.h"
-#include "llarp.hpp"
+#include <belnet.h>
+#include <llarp.hpp>
 #include <llarp/config/config.hpp>
 #include <llarp/crypto/crypto_libsodium.hpp>
 
@@ -13,6 +13,8 @@
 #include <llarp/util/logging/buffer.hpp>
 
 #include <mutex>
+#include <memory>
+#include <chrono>
 
 #ifdef _WIN32
 #define EHOSTDOWN ENETDOWN
@@ -30,6 +32,166 @@ namespace
       return std::make_shared<llarp::NodeDB>();
     }
   };
+
+   struct UDPFlow
+  {
+    using Clock_t = std::chrono::steady_clock;
+    void* m_FlowUserData;
+    std::chrono::seconds m_FlowTimeout;
+    std::chrono::time_point<Clock_t> m_ExpiresAt;
+    belnet_udp_flowinfo m_FlowInfo;
+    belnet_udp_flow_recv_func m_Recv;
+
+    /// call timeout hook for this flow
+    void
+    TimedOut(belnet_udp_flow_timeout_func timeout)
+    {
+      timeout(&m_FlowInfo, m_FlowUserData);
+    }
+
+    /// mark this flow as active
+    /// updates the expires at timestamp
+    void
+    MarkActive()
+    {
+      m_ExpiresAt = Clock_t::now() + m_FlowTimeout;
+    }
+
+    /// returns true if we think this flow is expired
+    bool
+    IsExpired() const
+    {
+      return Clock_t::now() >= m_ExpiresAt;
+    }
+
+    void
+    HandlePacket(const llarp::net::IPPacket& pkt)
+    {
+      if (auto maybe = pkt.L4Data())
+      {
+        MarkActive();
+        m_Recv(&m_FlowInfo, maybe->first, maybe->second, m_FlowUserData);
+      }
+    }
+  };
+
+  struct UDPHandler
+  {
+    using AddressVariant_t = llarp::vpn::AddressVariant_t;
+    int m_SocketID;
+    llarp::nuint16_t m_LocalPort;
+    belnet_udp_flow_filter m_Filter;
+    belnet_udp_flow_recv_func m_Recv;
+    belnet_udp_flow_timeout_func m_Timeout;
+    void* m_User;
+    std::weak_ptr<llarp::service::Endpoint> m_Endpoint;
+
+    std::unordered_map<AddressVariant_t, UDPFlow> m_Flows;
+
+    std::mutex m_Access;
+
+    explicit UDPHandler(
+        int socketid,
+        llarp::nuint16_t localport,
+        belnet_udp_flow_filter filter,
+        belnet_udp_flow_recv_func recv,
+        belnet_udp_flow_timeout_func timeout,
+        void* user,
+        std::weak_ptr<llarp::service::Endpoint> ep)
+        : m_SocketID{socketid}
+        , m_LocalPort{localport}
+        , m_Filter{filter}
+        , m_Recv{recv}
+        , m_Timeout{timeout}
+        , m_User{user}
+        , m_Endpoint{ep}
+    {}
+
+    void
+    KillAllFlows()
+    {
+      std::unique_lock lock{m_Access};
+      for (auto& item : m_Flows)
+      {
+        item.second.TimedOut(m_Timeout);
+      }
+      m_Flows.clear();
+    }
+
+    void
+    AddFlow(
+        const AddressVariant_t& from,
+        const belnet_udp_flowinfo& flow_addr,
+        void* flow_userdata,
+        int flow_timeoutseconds)
+    {
+      std::unique_lock lock{m_Access};
+      auto& flow = m_Flows[from];
+      flow.m_FlowInfo = flow_addr;
+      flow.m_FlowTimeout = std::chrono::seconds{flow_timeoutseconds};
+      flow.m_FlowUserData = flow_userdata;
+    }
+
+    void
+    ExpireOldFlows()
+    {
+      std::unique_lock lock{m_Access};
+      for (auto itr = m_Flows.begin(); itr != m_Flows.end();)
+      {
+        if (itr->second.IsExpired())
+        {
+          itr->second.TimedOut(m_Timeout);
+          itr = m_Flows.erase(itr);
+        }
+        else
+          ++itr;
+      }
+    }
+
+    void
+    HandlePacketFrom(AddressVariant_t from, llarp::net::IPPacket pkt)
+    {
+      bool isNewFlow{false};
+      {
+        std::unique_lock lock{m_Access};
+        isNewFlow = m_Flows.count(from) == 0;
+      }
+      if (isNewFlow)
+      {
+        belnet_udp_flowinfo flow_addr{};
+        // set flow remote address
+        var::visit(
+            [&flow_addr](auto&& from) {
+              const auto addr = from.ToString();
+              std::copy_n(
+                  addr.data(),
+                  std::min(addr.size(), sizeof(flow_addr.remote_host)),
+                  flow_addr.remote_host);
+            },
+            from);
+        // set socket id
+        flow_addr.socket_id = m_SocketID;
+        // get source port
+        if (auto srcport = pkt.SrcPort())
+        {
+          flow_addr.remote_port = ToHost(*srcport).h;
+        }
+        else
+          return;  // invalid data so we bail
+        void* flow_userdata = nullptr;
+        int flow_timeoutseconds{};
+        // got a new flow, let's check if we want it
+        if (m_Filter(m_User, &flow_addr, &flow_userdata, &flow_timeoutseconds))
+          return;
+        AddFlow(from, flow_addr, flow_userdata, flow_timeoutseconds);
+      }
+      {
+        std::unique_lock lock{m_Access};
+        m_Flows[from].HandlePacket(pkt);
+      }
+    }
+  };
+
 }  // namespace
 
 struct belnet_context
@@ -41,7 +203,10 @@ struct belnet_context
 
   std::unique_ptr<std::thread> runner;
 
-  belnet_context() : impl{std::make_shared<Context>()}, config{llarp::Config::EmbeddedConfig()}
+  int _socket_id;
+
+  belnet_context()
+      : impl{std::make_shared<Context>()}, config{llarp::Config::EmbeddedConfig()}, _socket_id{0}
   {}
 
   ~belnet_context()
@@ -49,6 +214,99 @@ struct belnet_context
     if (runner)
       runner->join();
   }
+
+  int
+  next_socket_id()
+  {
+    int id = ++_socket_id;
+    // handle overflow
+    if (id < 0)
+    {
+      _socket_id = 0;
+      id = ++_socket_id;
+    }
+    return id;
+  }
+
+  /// make a udp handler and hold onto it
+  /// return its id
+  [[nodiscard]] std::optional<int>
+  make_udp_handler(
+      const std::shared_ptr<llarp::service::Endpoint>& ep,
+      llarp::huint16_t exposePort,
+      belnet_udp_flow_filter filter,
+      belnet_udp_flow_recv_func recv,
+      belnet_udp_flow_timeout_func timeout,
+      void* user)
+  {
+    if (udp_sockets.empty())
+    {
+      // start udp flow expiration timer
+      impl->router->loop()->call_every(1s, std::make_shared<int>(0), [this]() {
+        std::unique_lock lock{m_access};
+        for (auto& item : udp_sockets)
+        {
+          item.second->ExpireOldFlows();
+        }
+      });
+    }
+
+    auto udp = std::make_shared<UDPHandler>(
+        next_socket_id(), llarp::ToNet(exposePort), filter, recv, timeout, user, std::weak_ptr{ep});
+    auto id = udp->m_SocketID;
+    std::promise<bool> result;
+
+    impl->router->loop()->call([ep, &result, udp,exposePort]() {
+      if (auto pkt = ep->EgresPacketRouter())
+      {
+        pkt->AddUDPHandler(exposePort, [udp = std::weak_ptr{udp}](auto from, auto pkt) {
+          if (auto ptr = udp.lock())
+          {
+            ptr->HandlePacketFrom(std::move(from), std::move(pkt));
+          }
+        });
+        result.set_value(true);
+      }
+      else
+        result.set_value(false);
+    
+    });
+
+    if (result.get_future().get())
+    {
+      udp_sockets[udp->m_SocketID] = std::move(udp);
+      return id;
+    }
+    return std::nullopt;
+  }
+
+  void
+  remove_udp_handler(int socket_id)
+  {
+    std::shared_ptr<UDPHandler> udp;
+    {
+      std::unique_lock lock{m_access};
+      if (auto itr = udp_sockets.find(socket_id); itr != udp_sockets.end())
+      {
+        udp = std::move(itr->second);
+        udp_sockets.erase(itr);
+      }
+    }
+    if (udp)
+    {
+      udp->KillAllFlows();
+
+      // remove packet handler
+      impl->router->loop()->call(
+          [ep = udp->m_Endpoint.lock(), localport = llarp::ToHost(udp->m_LocalPort)]() {
+            if (auto pkt = ep->EgresPacketRouter())
+              pkt->RemoveUDPHandler(localport);
+          });
+
+    }
+      
+  }
+
 
   /// acquire mutex for accessing this context
   [[nodiscard]] auto
@@ -64,6 +322,7 @@ struct belnet_context
   }
 
   std::unordered_map<int, bool> streams;
+  std::unordered_map<int, std::shared_ptr<UDPHandler>> udp_sockets;
 
   void
   inbound_stream(int id)
@@ -80,7 +339,6 @@ struct belnet_context
 
 namespace
 {
-  std::unique_ptr<belnet_context> g_context;
 
   void
   stream_error(belnet_stream_result* result, int err)
@@ -359,11 +617,11 @@ extern "C"
       return;
     auto lock = ctx->acquire();
 
-    if (not ctx->impl->IsStopping())
-    {
-      ctx->impl->CloseAsync();
-      ctx->impl->Wait();
-    }
+    if (ctx->impl->IsStopping())
+      return;
+
+    ctx->impl->CloseAsync();
+    ctx->impl->Wait();
 
     if (ctx->runner)
       ctx->runner->join();
@@ -619,4 +877,163 @@ extern "C"
     delete result->internal;
     result->internal = nullptr;
   }
+
+
+  int EXPORT
+  belnet_udp_bind(
+      uint16_t exposedPort,
+      belnet_udp_flow_filter filter,
+      belnet_udp_flow_recv_func recv,
+      belnet_udp_flow_timeout_func timeout,
+      void* user,
+      struct belnet_udp_bind_result* result,
+      struct belnet_context* ctx)
+  {
+    if (filter == nullptr or recv == nullptr or timeout == nullptr or result == nullptr
+        or ctx == nullptr)
+      return EINVAL;
+
+    auto lock = ctx->acquire();
+    if (auto ep = ctx->endpoint())
+    {
+      if (auto maybe =
+              ctx->make_udp_handler(ep, llarp::huint16_t{exposedPort}, filter, recv, timeout, user))
+      {
+        result->socket_id = *maybe;
+        return 0;
+      }
+    }
+    
+    return EINVAL;
+  }
+
+  void EXPORT
+  belnet_udp_close(int socket_id, struct belnet_context* ctx)
+  {
+    if (ctx)
+    {
+      ctx->remove_udp_handler(socket_id);
+    }
+      
+  }
+
+  int EXPORT
+  belnet_udp_flow_send(
+      const struct belnet_udp_flowinfo* remote,
+      const void* ptr,
+      size_t len,
+      struct belnet_context* ctx)
+  {
+    if (remote == nullptr or remote->remote_port == 0 or ptr == nullptr or len == 0
+        or ctx == nullptr)
+      return EINVAL;
+    std::shared_ptr<llarp::EndpointBase> ep;
+    llarp::nuint16_t srcport{0};
+    llarp::nuint16_t dstport{llarp::ToNet(llarp::huint16_t{remote->remote_port})};
+    {
+      auto lock = ctx->acquire();
+      if (auto itr = ctx->udp_sockets.find(remote->socket_id); itr != ctx->udp_sockets.end())
+      {
+        ep = itr->second->m_Endpoint.lock();
+        srcport = itr->second->m_LocalPort;
+      }
+      else
+        return EHOSTUNREACH;
+    }
+    if (auto maybe = llarp::service::ParseAddress(std::string{remote->remote_host}))
+    {
+      llarp::net::IPPacket pkt = llarp::net::IPPacket::UDP(
+          llarp::nuint32_t{0},
+          srcport,
+          llarp::nuint32_t{0},
+          dstport,
+          llarp_buffer_t{reinterpret_cast<const uint8_t*>(ptr), len});
+
+      if (pkt.sz == 0)
+        return EINVAL;
+      std::promise<int> ret;
+      ctx->impl->router->loop()->call([addr = *maybe, pkt = std::move(pkt), ep, &ret]() {
+        if (auto tag = ep->GetBestConvoTagFor(addr))
+        {
+          if (ep->SendToOrQueue(*tag, pkt.ConstBuffer(), llarp::service::ProtocolType::TrafficV4))
+          {
+            ret.set_value(0);
+            return;
+          }
+        }
+        ret.set_value(ENETUNREACH);
+      });
+      return ret.get_future().get();
+    }
+    return EINVAL;
+  }
+
+  int EXPORT
+  belnet_udp_establish(
+      belnet_udp_create_flow_func create_flow,
+      void* user,
+      const struct belnet_udp_flowinfo* remote,
+      struct belnet_context* ctx)
+  {
+    if (create_flow == nullptr or remote == nullptr or ctx == nullptr)
+      return EINVAL;
+    std::shared_ptr<llarp::EndpointBase> ep;
+    {
+      auto lock = ctx->acquire();
+      if (ctx->impl->router->loop()->inEventLoop())
+      {
+        llarp::LogError("cannot call udp_establish from internal event loop");
+        return EINVAL;
+      }
+
+      if (auto itr = ctx->udp_sockets.find(remote->socket_id); itr != ctx->udp_sockets.end())
+      {
+        ep = itr->second->m_Endpoint.lock();
+      }
+      else
+        return EHOSTUNREACH;
+    }
+    if (auto maybe = llarp::service::ParseAddress(std::string{remote->remote_host}))
+    {
+      {
+        // check for pre existing flow
+        auto lock = ctx->acquire();
+        if (auto itr = ctx->udp_sockets.find(remote->socket_id); itr != ctx->udp_sockets.end())
+        {
+          auto& udp = itr->second;
+          if (udp->m_Flows.count(*maybe))
+          {
+            // we already have a flow.
+            return EADDRINUSE;
+          }
+        }
+      }
+      std::promise<bool> gotten;
+      ctx->impl->router->loop()->call([addr = *maybe, ep, &gotten]() {
+        ep->EnsurePathTo(
+            addr, [&gotten](auto result) { gotten.set_value(result.has_value()); }, 5s);
+      });
+      if (gotten.get_future().get())
+      {
+        void* flow_data{nullptr};
+        int flow_timeoutseconds{};
+        create_flow(user, &flow_data, &flow_timeoutseconds);
+        {
+          auto lock = ctx->acquire();
+          if (auto itr = ctx->udp_sockets.find(remote->socket_id); itr != ctx->udp_sockets.end())
+          {
+            itr->second->AddFlow(*maybe, *remote, flow_data, flow_timeoutseconds);
+            return 0;
+          }
+          else
+            return EADDRINUSE;
+        }
+      }
+      else
+        return ETIMEDOUT;
+    }
+    return EINVAL;
+  }
+
+
 }
