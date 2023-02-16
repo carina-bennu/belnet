@@ -22,6 +22,35 @@
 
 namespace
 {
+
+   struct Logger : public llarp::ILogStream
+  {
+    belnet_logger_func func;
+    void* user;
+
+    explicit Logger(belnet_logger_func _func, void* _user) : func{_func}, user{_user}
+    {}
+  
+    void
+    PreLog(std::stringstream&, llarp::LogLevel, std::string_view , int, const std::string&) const override
+    {}
+
+    void
+    Print(llarp::LogLevel, std::string_view , const std::string& msg) override
+    {
+      func(msg.c_str(), user);
+    }
+
+    void
+    PostLog(std::stringstream&) const override{};
+
+    void
+    ImmediateFlush() override{};
+
+    void Tick(llarp_time_t) override{};
+  };
+
+
   struct Context : public llarp::Context
   {
     using llarp::Context::Context;
@@ -1033,6 +1062,12 @@ extern "C"
         return ETIMEDOUT;
     }
     return EINVAL;
+  }
+
+  void EXPORT
+  belnet_set_logger(belnet_logger_func func, void* user)
+  {
+    llarp::LogContext::Instance().logStream.reset(new Logger{func, user});
   }
 
 

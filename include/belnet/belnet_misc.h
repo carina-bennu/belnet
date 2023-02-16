@@ -21,6 +21,12 @@ extern "C"
   int EXPORT
   belnet_log_level(const char*);
 
+  typedef void (*belnet_logger_func)(const char*, void*);
+
+  /// set a custom logger function
+  void EXPORT
+  belnet_set_logger(belnet_logger_func func, void* user);
+
   /// @brief take in hex and turn it into base32z
   /// @return value must be free()'d later
   char* EXPORT
