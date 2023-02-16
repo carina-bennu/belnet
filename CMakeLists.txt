@@ -5,8 +5,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Has to be set before `project()`, and ignored on non-macos:
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
+option(BUILD_DAEMON "build belnet daemon and associated utils" ON)
+
 set(LANGS C CXX)
-if(APPLE)
+if(APPLE AND BUILD_DAEMON)
   set(LANGS ${LANGS} OBJC Swift)
 endif()
 
