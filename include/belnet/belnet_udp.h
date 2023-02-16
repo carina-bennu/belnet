@@ -30,28 +30,28 @@ extern "C"
 
     /// flow acceptor hook, return 0 success, return nonzero with errno on failure
   typedef int (*belnet_udp_flow_filter)(
-    void* /*user*/, 
-    const struct belnet_udp_flowinfo* /* remote address */, 
-    void** /* flow-userdata */, 
-    int* /* timeout seconds*/);
+    void* userdata, 
+    const struct belnet_udp_flowinfo* remote_address, 
+    void** flow_userdata, 
+    int* timeout_seconds);
 
 
 
     /// callback to make a new outbound flow
   typedef void(belnet_udp_create_flow_func)(
-    void* /*userdata*/, void** /*flow userdata*/, int* /* flowtimeout */);
+    void* userdata, void** flow_userdata, int* timeout_seconds);
 
   /// hook function for handling packets
   typedef void (*belnet_udp_flow_recv_func)(
-    const struct belnet_udp_flowinfo* /* remote address */, 
-    const char* /* data pointer */, 
-    size_t /* data length */, 
-    void* /* flow-userdata */);
+    const struct belnet_udp_flowinfo* remote_address, 
+    const char* pkt_data, 
+    size_t pkt_length, 
+    void* flow_userdata);
 
   /// hook function for flow timeout
   typedef void (*belnet_udp_flow_timeout_func)(
-    const struct belnet_udp_flowinfo* /* remote address  */, 
-    void* /* flow-userdata */);
+    const struct belnet_udp_flowinfo* remote_address, 
+    void* flow_userdata);
 
   /// inbound listen udp socket
   /// expose udp port exposePort to the void
