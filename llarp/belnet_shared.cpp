@@ -159,6 +159,7 @@ namespace
       flow.m_FlowInfo = flow_addr;
       flow.m_FlowTimeout = std::chrono::seconds{flow_timeoutseconds};
       flow.m_FlowUserData = flow_userdata;
+      flow.m_Recv = m_Recv;
     }
 
     void
@@ -288,11 +289,8 @@ struct belnet_context
     impl->router->loop()->call([ep, &result, udp,exposePort]() {
       if (auto pkt = ep->EgresPacketRouter())
       {
-        pkt->AddUDPHandler(exposePort, [udp = std::weak_ptr{udp}](auto from, auto pkt) {
-          if (auto ptr = udp.lock())
-          {
-            ptr->HandlePacketFrom(std::move(from), std::move(pkt));
-          }
+        pkt->AddUDPHandler(exposePort, [udp](auto from, auto pkt) {
+          udp->HandlePacketFrom(std::move(from), std::move(pkt));
         });
         result.set_value(true);
       }
@@ -1039,8 +1037,14 @@ extern "C"
       }
       std::promise<bool> gotten;
       ctx->impl->router->loop()->call([addr = *maybe, ep, &gotten]() {
-        ep->EnsurePathTo(
+        ep->MarkAddressOutbound(addr);
+        auto res = ep->EnsurePathTo(
             addr, [&gotten](auto result) { gotten.set_value(result.has_value()); }, 5s);
+        
+        if (not res)
+        {
+          gotten.set_value(false);
+        }
       });
       if (gotten.get_future().get())
       {
