@@ -116,7 +116,7 @@ if(APPLE)
       @ONLY)
     add_custom_target(
       sign
-      DEPENDS "${PROJECT_BINARY_DIR}/sign.sh" belnet belnet-extension belnet-shared
+      DEPENDS "${PROJECT_BINARY_DIR}/sign.sh" belnet belnet-extension
       COMMAND "${PROJECT_BINARY_DIR}/sign.sh"
       )
   else()

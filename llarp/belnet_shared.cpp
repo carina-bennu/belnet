@@ -22,6 +22,35 @@
 
 namespace
 {
+
+   struct Logger : public llarp::ILogStream
+  {
+    belnet_logger_func func;
+    void* user;
+
+    explicit Logger(belnet_logger_func _func, void* _user) : func{_func}, user{_user}
+    {}
+  
+    void
+    PreLog(std::stringstream&, llarp::LogLevel, std::string_view , int, const std::string&) const override
+    {}
+
+    void
+    Print(llarp::LogLevel, std::string_view , const std::string& msg) override
+    {
+      func(msg.c_str(), user);
+    }
+
+    void
+    PostLog(std::stringstream&) const override{};
+
+    void
+    ImmediateFlush() override{};
+
+    void Tick(llarp_time_t) override{};
+  };
+
+
   struct Context : public llarp::Context
   {
     using llarp::Context::Context;
@@ -123,13 +152,17 @@ namespace
         const AddressVariant_t& from,
         const belnet_udp_flowinfo& flow_addr,
         void* flow_userdata,
-        int flow_timeoutseconds)
+        int flow_timeoutseconds,
+        std::optional<llarp::net::IPPacket> firstPacket = std::nullopt)
     {
       std::unique_lock lock{m_Access};
       auto& flow = m_Flows[from];
       flow.m_FlowInfo = flow_addr;
       flow.m_FlowTimeout = std::chrono::seconds{flow_timeoutseconds};
       flow.m_FlowUserData = flow_userdata;
+      flow.m_Recv = m_Recv;
+      if (firstPacket)
+        flow.HandlePacket(*firstPacket);
     }
 
     void
@@ -151,44 +184,39 @@ namespace
     void
     HandlePacketFrom(AddressVariant_t from, llarp::net::IPPacket pkt)
     {
-      bool isNewFlow{false};
+      
       {
         std::unique_lock lock{m_Access};
-        isNewFlow = m_Flows.count(from) == 0;
-      }
-      if (isNewFlow)
-      {
-        belnet_udp_flowinfo flow_addr{};
-        // set flow remote address
-        var::visit(
-            [&flow_addr](auto&& from) {
-              const auto addr = from.ToString();
-              std::copy_n(
-                  addr.data(),
-                  std::min(addr.size(), sizeof(flow_addr.remote_host)),
-                  flow_addr.remote_host);
-            },
-            from);
-        // set socket id
-        flow_addr.socket_id = m_SocketID;
-        // get source port
-        if (auto srcport = pkt.SrcPort())
+        if (m_Flows.count(from))
         {
-          flow_addr.remote_port = ToHost(*srcport).h;
-        }
-        else
-          return;  // invalid data so we bail
-        void* flow_userdata = nullptr;
-        int flow_timeoutseconds{};
-        // got a new flow, let's check if we want it
-        if (m_Filter(m_User, &flow_addr, &flow_userdata, &flow_timeoutseconds))
+          m_Flows[from].HandlePacket(pkt);
           return;
-        AddFlow(from, flow_addr, flow_userdata, flow_timeoutseconds);
+        }
       }
+
+      belnet_udp_flowinfo flow_addr{};
+      // set flow remote address
+      std::string addrstr = var::visit([&flow_addr](auto&& from) { return from.ToString(); }, from);
+
+      std::copy_n(
+          addrstr.data(),
+          std::min(addrstr.size(), sizeof(flow_addr.remote_host)),
+          flow_addr.remote_host);
+      // set socket id
+      flow_addr.socket_id = m_SocketID;
+      // get source port
+      if (const auto srcport = pkt.SrcPort())
       {
-        std::unique_lock lock{m_Access};
-        m_Flows[from].HandlePacket(pkt);
+        flow_addr.remote_port = ToHost(*srcport).h;
       }
+      else
+        return;  // invalid data so we bail
+      void* flow_userdata = nullptr;
+      int flow_timeoutseconds{};
+      // got a new flow, let's check if we want it
+      if (m_Filter(m_User, &flow_addr, &flow_userdata, &flow_timeoutseconds))
+        return;
+      AddFlow(from, flow_addr, flow_userdata, flow_timeoutseconds, pkt);
     }
   };
 
@@ -259,11 +287,8 @@ struct belnet_context
     impl->router->loop()->call([ep, &result, udp,exposePort]() {
       if (auto pkt = ep->EgresPacketRouter())
       {
-        pkt->AddUDPHandler(exposePort, [udp = std::weak_ptr{udp}](auto from, auto pkt) {
-          if (auto ptr = udp.lock())
-          {
-            ptr->HandlePacketFrom(std::move(from), std::move(pkt));
-          }
+        pkt->AddUDPHandler(exposePort, [udp](auto from, auto pkt) {
+          udp->HandlePacketFrom(std::move(from), std::move(pkt));
         });
         result.set_value(true);
       }
@@ -1010,8 +1035,14 @@ extern "C"
       }
       std::promise<bool> gotten;
       ctx->impl->router->loop()->call([addr = *maybe, ep, &gotten]() {
-        ep->EnsurePathTo(
+        ep->MarkAddressOutbound(addr);
+        auto res = ep->EnsurePathTo(
             addr, [&gotten](auto result) { gotten.set_value(result.has_value()); }, 5s);
+        
+        if (not res)
+        {
+          gotten.set_value(false);
+        }
       });
       if (gotten.get_future().get())
       {
@@ -1033,6 +1064,12 @@ extern "C"
         return ETIMEDOUT;
     }
     return EINVAL;
+  }
+
+  void EXPORT
+  belnet_set_logger(belnet_logger_func func, void* user)
+  {
+    llarp::LogContext::Instance().logStream.reset(new Logger{func, user});
   }
 
 
