@@ -242,7 +242,7 @@ if(WITH_HIVE)
   )
 endif()
 
-target_link_libraries(libbelnet PUBLIC cxxopts belnet-platform belnet-util belnet-cryptography sqlite_orm ngtcp2)
+target_link_libraries(libbelnet PUBLIC cxxopts belnet-platform belnet-util belnet-cryptography sqlite_orm ngtcp2_static)
 target_link_libraries(libbelnet PRIVATE libunbound)
 
 
