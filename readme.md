@@ -60,6 +60,26 @@ install:
 
     $ sudo make install
 
+
+supported cross targets:
+
+* aarch64
+* armhf
+* mips
+* mips64
+* mipsel
+* ppc64le
+
+install the toolchain for `$arch` this example is `aarch64`
+
+    $ sudo apt install g{cc,++}-aarch64-linux-gnu
+
+build 1 or many cross targets:
+
+    $ ./contrib/cross.sh arch_1 arch_2 ... arch_n    
+
+    
+
 ### macOS
 
 Belnet ~~is~~ will be available on the Apple App store. 
