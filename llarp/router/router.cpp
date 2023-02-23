@@ -140,16 +140,19 @@ namespace llarp
     std::vector<nlohmann::json> builders;
     if(services.is_object())
     {
-      const auto serviceDefault = services["default"];
+
+      const auto& serviceDefault = services.at("default");
       builders.push_back(serviceDefault);
 
-      const auto mnodeSessions = serviceDefault["mnodeSessions"];
-      for(auto &session:mnodeSessions)
-      builders.push_back(session);
+      auto mnode_sessions = serviceDefault.at("mnodeSessions");
+      
+      for (const auto& session : mnode_sessions)
+        builders.push_back(session);
 
-      const auto remoteSessions = serviceDefault["remoteSessions"];
-      for(auto &session:remoteSessions)
-      builders.push_back(session);
+      auto remote_sessions = serviceDefault.at("remoteSessions");
+
+      for (const auto& session : remote_sessions)
+        builders.push_back(session);
       
     }
 
