@@ -11,7 +11,7 @@
 #include <llarp/nodedb.hpp>
 
 #include <llarp/util/logging/buffer.hpp>
-#include <oxenmq/base32z.h>
+#include <oxenc/base32z.h>
 
 #include <mutex>
 #include <memory>
@@ -836,10 +836,10 @@ extern "C"
   char* EXPORT
   belnet_hex_to_base32z(const char* hex)
   {
-    const auto base32z = oxenmq::to_base32z(oxenmq::from_hex(std::string{hex}));
+    const auto base32z = oxenc::to_base32z(oxenc::from_hex(std::string{hex}));
     return strdup(base32z.c_str());
     std::string_view hexview{hex};
-    if (not oxenmq::is_hex(hexview))
+    if (not oxenc::is_hex(hexview))
       return nullptr;
 
     const size_t byte_len = hexview.size() / 2;
@@ -850,9 +850,9 @@ extern "C"
     // Write the bytes into the *end* of the buffer so that when we rewrite the final b32z chars
     // into the buffer we won't overwrite any byte values until after we've consumed them.
     char* bytepos = end - byte_len;
-    oxenmq::from_hex(hexview.begin(), hexview.end(), bytepos);
+    oxenc::from_hex(hexview.begin(), hexview.end(), bytepos);
     // In-place conversion into the buffer
-    oxenmq::to_base32z(bytepos, end, buf.get());
+    oxenc::to_base32z(bytepos, end, buf.get());
     return buf.release();  // leak the buffer to the caller
   }
 
