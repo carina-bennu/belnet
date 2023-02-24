@@ -47,15 +47,21 @@ endif()
 
 
 add_custom_command(
-    OUTPUT markdown
-    COMMAND ${DOXYBOOK2} --input ${CMAKE_CURRENT_BINARY_DIR}/doxyxml --output ${CMAKE_CURRENT_BINARY_DIR}/markdown --config config.json
+    OUTPUT gen
+    COMMAND ${DOXYBOOK2} --input ${CMAKE_CURRENT_BINARY_DIR}/doxyxml --output ${CMAKE_CURRENT_BINARY_DIR}/gen --config config.json
     DEPENDS
     ${doxybook_localbin}
-    ${CMAKE_CURRENT_BINARY_DIR}/markdown/index.md
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/index.md
     ${CMAKE_CURRENT_BINARY_DIR}/config.json
     ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml)
 
 add_custom_target(clean_html COMMAND ${CMAKE_COMMAND} -E rm -rf html)
+
+add_custom_command(
+  OUTPUT markdown
+  COMMAND find ${CMAKE_CURRENT_BINARY_DIR}/gen/ -type f -name '*.md' -exec ${CMAKE_CURRENT_SOURCE_DIR}/fix-markdown.sh {} "\;" && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/gen ${CMAKE_CURRENT_BINARY_DIR}/markdown
+  DEPENDS gen
+)
 
 add_custom_command(
   OUTPUT html
@@ -64,12 +70,12 @@ add_custom_command(
   clean_html
   ${CMAKE_CURRENT_BINARY_DIR}/markdown)
 
-add_custom_target(doc DEPENDS html)
+add_custom_target(doc DEPENDS markdown)
 
 # we seperate this step out so we force clean_markdown to run before markdown target
 add_custom_command(
-  OUTPUT markdown/index.md
-  COMMAND ${CMAKE_COMMAND} -E copy index.md markdown/index.md
+  OUTPUT gen/index.md
+  COMMAND ${CMAKE_COMMAND} -E copy index.md gen/index.md
   DEPENDS clean_markdown)
   
 configure_file(Doxyfile.in Doxyfile @ONLY)
