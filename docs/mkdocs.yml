@@ -1,0 +1,5 @@
+site_name: Belnet
+theme:
+  name: 'readthedocs'
+docs_dir: markdown
+site_dir: html
