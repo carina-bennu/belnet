@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <oxenc/bt.h>
+
 #include <llarp/util/time.hpp>
 
 namespace llarp
