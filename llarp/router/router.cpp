@@ -94,18 +94,17 @@ namespace llarp
   util::StatusObject
   Router::ExtractStatus() const
   {
-    if (_running)
-    {
-      return util::StatusObject{
-          {"running", true},
-          {"numNodesKnown", _nodedb->NumLoaded()},
-          {"dht", _dht->impl->ExtractStatus()},
-          {"services", _hiddenServiceContext.ExtractStatus()},
-          {"exit", _exitContext.ExtractStatus()},
-          {"links", _linkManager.ExtractStatus()},
-          {"outboundMessages", _outboundMessageHandler.ExtractStatus()}};
-    }
-    return util::StatusObject{{"running", false}};
+    if (not _running)
+      util::StatusObject{{"running", false}};
+
+    return util::StatusObject{
+        {"running", true},
+        {"numNodesKnown", _nodedb->NumLoaded()},
+        {"dht", _dht->impl->ExtractStatus()},
+        {"services", _hiddenServiceContext.ExtractStatus()},
+        {"exit", _exitContext.ExtractStatus()},
+        {"links", _linkManager.ExtractStatus()},
+        {"outboundMessages", _outboundMessageHandler.ExtractStatus()}};
   }
 
   util::StatusObject
@@ -115,8 +114,6 @@ namespace llarp
       return util::StatusObject{{"running", false}};
 
     auto services = _hiddenServiceContext.ExtractStatus();
-    if (services.is_null())
-      return util::StatusObject{{"running", false}};
 
     auto link_types = _linkManager.ExtractStatus();
 
@@ -141,19 +138,16 @@ namespace llarp
     // Compute all stats on all path builders on the default endpoint
     // Merge mnodeSessions, remoteSessions and default into a single array
     std::vector<nlohmann::json> builders;
-    if(services.is_object())
+    if (services.is_object())
     {
-
       const auto& serviceDefault = services.at("default");
       builders.push_back(serviceDefault);
 
       auto mnode_sessions = serviceDefault.at("mnodeSessions");
-      
       for (const auto& session : mnode_sessions)
         builders.push_back(session);
 
       auto remote_sessions = serviceDefault.at("remoteSessions");
-
       for (const auto& session : remote_sessions)
         builders.push_back(session);
       
