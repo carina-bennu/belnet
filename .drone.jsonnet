@@ -320,7 +320,7 @@ local mac_builder(name,
     // Static build (on bionic) which gets uploaded to builds.belnet.dev:
     debian_pipeline("Static (bionic amd64)", docker_base+'ubuntu-bionic', deps='g++-8 python3-dev automake libtool', lto=true,
                     cmake_extra='-DBUILD_STATIC_DEPS=ON -DBUILD_SHARED_LIBS=OFF -DSTATIC_LINK=ON -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8 ' +
-                        '-DCMAKE_CXX_FLAGS="-march=x86-64 -mtune=haswell" -DCMAKE_C_FLAGS="-march=x86-64 -mtune=haswell" -DNATIVE_BUILD=OFF ' +
+                        '-DCMAKE_CXX_FLAGS="-march=x86-64 -mtune=haswell" -DCMAKE_C_FLAGS="-march=x86-64 -mtune=haswell" -DNATIVE_BUILD=OFF -DWITH_SYSTEMD=OFF -DWITH_BOOTSTRAP=OFF -DBUILD_LIBBELNET=OFF ' +
                         '-DWITH_SYSTEMD=OFF',
                     extra_cmds=[
                         '../contrib/ci/drone-check-static-libs.sh',
@@ -332,10 +332,11 @@ local mac_builder(name,
                     cmake_extra='-DWITH_HIVE=ON'),
 
     // Deb builds:
-    deb_builder("debian:sid", "sid", "debian/sid"),
-    deb_builder("debian:buster", "buster", "debian/buster"),
-    deb_builder("ubuntu:focal", "focal", "ubuntu/focal"),
-    deb_builder("debian:sid", "sid", "debian/sid", arch='arm64'),
+    deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid'),
+    deb_builder(docker_base + 'debian-bullseye-builder', 'bullseye', 'debian/bullseye'),
+    deb_builder(docker_base + 'ubuntu-impish-builder', 'impish', 'ubuntu/impish'),
+    deb_builder(docker_base + 'ubuntu-focal-builder', 'focal', 'ubuntu/focal'),
+    deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid', arch='arm64'),
 
     // Macos builds:
     mac_builder('macOS (Release)'),
