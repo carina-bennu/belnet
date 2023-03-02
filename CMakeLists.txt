@@ -67,6 +67,9 @@ option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
 
 include(cmake/enable_lto.cmake)
 
+option(CROSS_PLATFORM "cross compiler platform" "Linux")
+option(CROSS_PREFIX "toolchain cross compiler prefix" "")
+
 option(BUILD_STATIC_DEPS "Download, build, and statically link against core dependencies" OFF)
 option(STATIC_LINK "link statically against dependencies" ${BUILD_STATIC_DEPS})
 if(BUILD_STATIC_DEPS AND NOT STATIC_LINK)

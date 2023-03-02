@@ -142,6 +142,37 @@ local docs_pipeline(name, image, extra_cmds=[], allow_fail=false) = {
 };
 
 
+// linux cross compile on debian
+local linux_cross_pipeline(name,
+                           cross_targets,
+                           arch='amd64',
+                           build_type='Release',
+                           cmake_extra='',
+                           extra_cmds=[],
+                           jobs=6,
+                           allow_fail=false) = {
+  kind: 'pipeline',
+  type: 'docker',
+  name: name,
+  platform: { arch: arch },
+  trigger: { branch: { exclude: ['debian/*', 'ubuntu/*'] } },
+  steps: [
+    submodules,
+    {
+      name: 'build',
+      image: docker_base + 'debian-stable-cross',
+      pull: 'always',
+      [if allow_fail then 'failure']: 'ignore',
+      environment: { SSH_KEY: { from_secret: 'SSH_KEY' }, CROSS_TARGETS: std.join(':', cross_targets) },
+      commands: [
+        'echo "Building on ${DRONE_STAGE_MACHINE}"',
+        'VERBOSE=1 JOBS=' + jobs + ' ./contrib/cross.sh ' + std.join(' ', cross_targets) + (if std.length(cmake_extra) > 0 then ' -- ' + cmake_extra else ''),
+      ] + extra_cmds,
+    },
+  ],
+};
+
+
 // Builds a snapshot .deb on a debian-like system by merging into the debian/* or ubuntu/* branch
 local deb_builder(image, distro, distro_branch, arch='amd64', beldex_repo=true) = {
     kind: 'pipeline',
@@ -271,6 +302,12 @@ local mac_builder(name,
                         'UPLOAD_OS=linux-armhf ../contrib/ci/drone-static-upload.sh'
                     ],
                     jobs=4),
+
+    // cross compile targets
+    linux_cross_pipeline('Cross Compile (mips)', cross_targets=['mips-linux-gnu', 'mipsel-linux-gnu']),
+    linux_cross_pipeline('Cross Compile (arm/arm64)', cross_targets=['arm-linux-gnueabihf', 'aarch64-linux-gnu']),
+    linux_cross_pipeline('Cross Compile (ppc64le)', cross_targets=['powerpc64le-linux-gnu']),
+
     // android apk builder
     apk_builder("android apk", "registry.beldex.io/belnet-ci-android", extra_cmds=['UPLOAD_OS=android ./contrib/ci/drone-static-upload.sh']),
 
@@ -283,7 +320,7 @@ local mac_builder(name,
     // Static build (on bionic) which gets uploaded to builds.belnet.dev:
     debian_pipeline("Static (bionic amd64)", docker_base+'ubuntu-bionic', deps='g++-8 python3-dev automake libtool', lto=true,
                     cmake_extra='-DBUILD_STATIC_DEPS=ON -DBUILD_SHARED_LIBS=OFF -DSTATIC_LINK=ON -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8 ' +
-                        '-DCMAKE_CXX_FLAGS="-march=x86-64 -mtune=haswell" -DCMAKE_C_FLAGS="-march=x86-64 -mtune=haswell" -DNATIVE_BUILD=OFF ' +
+                        '-DCMAKE_CXX_FLAGS="-march=x86-64 -mtune=haswell" -DCMAKE_C_FLAGS="-march=x86-64 -mtune=haswell" -DNATIVE_BUILD=OFF -DWITH_SYSTEMD=OFF -DWITH_BOOTSTRAP=OFF -DBUILD_LIBBELNET=OFF ' +
                         '-DWITH_SYSTEMD=OFF',
                     extra_cmds=[
                         '../contrib/ci/drone-check-static-libs.sh',
@@ -295,10 +332,11 @@ local mac_builder(name,
                     cmake_extra='-DWITH_HIVE=ON'),
 
     // Deb builds:
-    deb_builder("debian:sid", "sid", "debian/sid"),
-    deb_builder("debian:buster", "buster", "debian/buster"),
-    deb_builder("ubuntu:focal", "focal", "ubuntu/focal"),
-    deb_builder("debian:sid", "sid", "debian/sid", arch='arm64'),
+    deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid'),
+    deb_builder(docker_base + 'debian-bullseye-builder', 'bullseye', 'debian/bullseye'),
+    deb_builder(docker_base + 'ubuntu-impish-builder', 'impish', 'ubuntu/impish'),
+    deb_builder(docker_base + 'ubuntu-focal-builder', 'focal', 'ubuntu/focal'),
+    deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid', arch='arm64'),
 
     // Macos builds:
     mac_builder('macOS (Release)'),
