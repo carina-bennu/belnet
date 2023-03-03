@@ -9,6 +9,8 @@
 
 #include <oxenc/bt.h>
 
+#include <oxenc/hex.h>
+
 #include <llarp/util/time.hpp>
 
 namespace llarp
@@ -149,7 +151,12 @@ namespace llarp
       constexpr auto PingInterval = 30s;
       auto makePingRequest = [self = shared_from_this()]() {
         // send a ping
-        nlohmann::json payload = {{"version", {VERSION[0], VERSION[1], VERSION[2]}}};
+        PubKey pk{};
+        if (auto r = self->m_Router.lock())
+          pk = r->pubkey();
+        nlohmann::json payload = {
+            {"pubkey_ed25519", oxenc::to_hex(pk.begin(), pk.end())},
+            {"version", {VERSION[0], VERSION[1], VERSION[2]}}};
         self->Request(
             "admin.belnet_ping",
             [](bool success, std::vector<std::string> data) {
