@@ -351,6 +351,7 @@ namespace llarp
           m_AuthMethod = std::move(arg);
         });
 
+
     conf.defineOption<std::string>(
         "network",
         "auth-whitelist",
@@ -365,6 +366,18 @@ namespace llarp
             throw std::invalid_argument(stringify("bad beldex address: ", arg));
           m_AuthWhitelist.emplace(std::move(addr));
         });
+
+        conf.defineOption<std::string>(
+        "network",
+        "auth-static",
+        ClientOnly,
+        MultiValue,
+        Comment{
+            "manually add a static auth code to accept for endpoint auth",
+        },
+        [this](std::string arg) { m_AuthStaticTokens.emplace(std::move(arg)); 
+        });
+        
 
     conf.defineOption<bool>(
         "network",
