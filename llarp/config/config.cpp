@@ -366,6 +366,7 @@ namespace llarp
             throw std::invalid_argument(stringify("bad beldex address: ", arg));
           m_AuthWhitelist.emplace(std::move(addr));
         });
+        
 
         conf.defineOption<fs::path>(
         "network",
@@ -382,6 +383,18 @@ namespace llarp
                 stringify("cannot load auth file ", arg, " as it does not seem to exist")};
           m_AuthFiles.emplace(std::move(arg));
         });
+
+        conf.defineOption<std::string>(
+        "network",
+        "auth-file-type",
+        ClientOnly,
+        Comment{
+            "How to interpret the contents of an auth file.",
+            "Possible values: hashes, plaintext",
+        },
+        [this](std::string arg) { m_AuthFileType = service::ParseAuthFileType(std::move(arg)); 
+        });
+
 
         conf.defineOption<std::string>(
         "network",
