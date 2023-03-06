@@ -13,8 +13,9 @@
 #include <llarp/util/str.hpp>
 #include <cassert>
 #include <cstring>
-
+#ifndef _WIN32
 #include <crypt.h>
+#endif
 
 #include <llarp/util/str.hpp>
 
@@ -471,6 +472,13 @@ namespace llarp
     bool
     CryptoLibSodium::check_passwd_hash(std::string pwhash, std::string challenge)
     {
+
+
+#ifdef _WIN32
+      (void)pwhash;
+      (void)challenge;
+      return false;
+#else
       bool ret = false;
       auto pos = pwhash.find_last_of('$');
       auto settings = pwhash.substr(0, pos);
@@ -481,6 +489,7 @@ namespace llarp
       }
       sodium_memzero(&data, sizeof(data));
       return ret;
+#endif
     }
   }  // namespace sodium
 
