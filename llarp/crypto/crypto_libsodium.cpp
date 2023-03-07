@@ -13,7 +13,7 @@
 #include <llarp/util/str.hpp>
 #include <cassert>
 #include <cstring>
-#ifndef _WIN32
+#ifdef HAVE_CRYPT
 #include <crypt.h>
 #endif
 
@@ -474,12 +474,10 @@ namespace llarp
     {
 
 
-#ifdef _WIN32
       (void)pwhash;
       (void)challenge;
-      return false;
-#else
       bool ret = false;
+#ifdef HAVE_CRYPT
       auto pos = pwhash.find_last_of('$');
       auto settings = pwhash.substr(0, pos);
       crypt_data data{};
@@ -488,8 +486,9 @@ namespace llarp
         ret = ptr == pwhash;
       }
       sodium_memzero(&data, sizeof(data));
-      return ret;
+      
 #endif
+      return ret;
     }
   }  // namespace sodium
 
