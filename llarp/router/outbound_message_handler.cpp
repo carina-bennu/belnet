@@ -84,7 +84,7 @@ namespace llarp
     m_Killer.TryAccess([this]() {
       recentlyRemovedPaths.Decay();
       ProcessOutboundQueue();
-      if (SendRoundRobin())
+      if (/*bool more = */ SendRoundRobin())
         _router->TriggerPump();
     });
   }
