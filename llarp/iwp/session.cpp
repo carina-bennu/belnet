@@ -5,6 +5,8 @@
 #include <llarp/util/meta/memfn.hpp>
 #include <llarp/router/abstractrouter.hpp>
 
+#include <queue>
+
 namespace llarp
 {
   namespace iwp
@@ -126,10 +128,12 @@ namespace llarp
       if (not msg.BEncode(&buf))
       {
         LogError("failed to encode LIM for ", m_RemoteAddr);
+        return;
       }
-      if (!SendMessageBuffer(std::move(data), h))
+      if (not SendMessageBuffer(std::move(data), h))
       {
         LogError("failed to send LIM to ", m_RemoteAddr);
+        return;
       }
       LogTrace("sent LIM to ", m_RemoteAddr);
     }
@@ -183,7 +187,7 @@ namespace llarp
 
     bool
     Session::SendMessageBuffer(
-        ILinkSession::Message_t buf, ILinkSession::CompletionHandler completed)
+      ILinkSession::Message_t buf, ILinkSession::CompletionHandler completed, uint16_t priority)
     {
       if (m_TXMsgs.size() >= MaxSendQueueSize)
       {
@@ -194,8 +198,9 @@ namespace llarp
       const auto now = m_Parent->Now();
       const auto msgid = m_TXID++;
       const auto bufsz = buf.size();
-      auto& msg = m_TXMsgs.emplace(msgid, OutboundMessage{msgid, std::move(buf), now, completed})
-                      .first->second;
+      auto& msg =
+          m_TXMsgs.emplace(msgid, OutboundMessage{msgid, std::move(buf), now, completed, priority})
+              .first->second;
       TriggerPump();
       EncryptAndSend(msg.XMIT());
       if (bufsz > FragmentSize)
@@ -223,7 +228,7 @@ namespace llarp
         const auto& itr = m_SendMACKs.top();
         while (numAcks > 0)
         {
-          htobe64buf(ptr, itr);
+          oxenc::write_host_as_big(itr, ptr);
           m_SendMACKs.pop();
           numAcks--;
           ptr += sizeof(uint64_t);
@@ -253,15 +258,24 @@ namespace llarp
             msg.SendACKS(util::memFn(&Session::EncryptAndSend, this), now);
           }
         }
+
+        std::priority_queue<
+            OutboundMessage*,
+            std::vector<OutboundMessage*>,
+            ComparePtr<OutboundMessage*>>
+            to_resend;
+
         for (auto& [id, msg] : m_TXMsgs)
         {
           if (msg.ShouldFlush(now))
-          {
-            msg.FlushUnAcked(util::memFn(&Session::EncryptAndSend, this), now);
-          }
+              to_resend.push(&msg);
+        }
+        if (not to_resend.empty())
+        {
+          for (auto& msg = to_resend.top(); not to_resend.empty(); to_resend.pop())
+            msg->FlushUnAcked(util::memFn(&Session::EncryptAndSend, this), now);
         }
       }
-      assert(shared_from_this().use_count() > 1);
       if (not m_EncryptNext.empty())
       {
         m_Parent->QueueWork(
@@ -716,7 +730,7 @@ namespace llarp
       byte_t* ptr = data.data() + CommandOverhead + PacketOverhead + 1;
       while (numAcks > 0)
       {
-        uint64_t acked = bufbe64toh(ptr);
+        auto acked = oxenc::load_big_to_host<uint64_t>(ptr);
         LogTrace("mack containing txid=", acked, " from ", m_RemoteAddr);
         auto itr = m_TXMsgs.find(acked);
         if (itr != m_TXMsgs.end())
@@ -743,7 +757,7 @@ namespace llarp
         LogError("short nack from ", m_RemoteAddr);
         return;
       }
-      uint64_t txid = bufbe64toh(data.data() + CommandOverhead + PacketOverhead);
+      auto txid = oxenc::load_big_to_host<uint64_t>(data.data() + CommandOverhead + PacketOverhead);
       LogTrace("got nack on ", txid, " from ", m_RemoteAddr);
       auto itr = m_TXMsgs.find(txid);
       if (itr != m_TXMsgs.end())
@@ -765,9 +779,9 @@ namespace llarp
         return;
       }
       auto* pos = data.data() + CommandOverhead + PacketOverhead;
-      uint16_t sz = bufbe16toh(pos);
+      auto sz = oxenc::load_big_to_host<uint16_t>(pos);
       pos += sizeof(sz);
-      uint64_t rxid = bufbe64toh(pos);
+      auto rxid = oxenc::load_big_to_host<uint64_t>(pos);
       pos += sizeof(rxid);
       auto p2 = pos + ShortHash::SIZE;
       assert(p2 == data.data() + XMITOverhead);
@@ -826,8 +840,9 @@ namespace llarp
         return;
       }
       m_LastRX = m_Parent->Now();
-      uint16_t sz = bufbe16toh(data.data() + CommandOverhead + PacketOverhead);
-      uint64_t rxid = bufbe64toh(data.data() + CommandOverhead + sizeof(uint16_t) + PacketOverhead);
+      auto sz = oxenc::load_big_to_host<uint16_t>(data.data() + CommandOverhead + PacketOverhead);
+      auto rxid = oxenc::load_big_to_host<uint64_t>(
+          data.data() + CommandOverhead + sizeof(uint16_t) + PacketOverhead);
       auto itr = m_RXMsgs.find(rxid);
       if (itr == m_RXMsgs.end())
       {
@@ -835,7 +850,7 @@ namespace llarp
         {
           LogTrace("no rxid=", rxid, " for ", m_RemoteAddr);
           auto nack = CreatePacket(Command::eNACK, 8);
-          htobe64buf(nack.data() + PacketOverhead + CommandOverhead, rxid);
+          oxenc::write_host_as_big(rxid, nack.data() + PacketOverhead + CommandOverhead);
           EncryptAndSend(std::move(nack));
         }
         else
@@ -888,7 +903,7 @@ namespace llarp
       }
       const auto now = m_Parent->Now();
       m_LastRX = now;
-      uint64_t txid = bufbe64toh(data.data() + 2 + PacketOverhead);
+      auto txid = oxenc::load_big_to_host<uint64_t>(data.data() + 2 + PacketOverhead);
       auto itr = m_TXMsgs.find(txid);
       if (itr == m_TXMsgs.end())
       {

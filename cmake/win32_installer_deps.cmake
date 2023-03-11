@@ -1,6 +1,5 @@
 if(NOT GUI_ZIP_URL)
   set(GUI_ZIP_URL "https://deb.beldex.io/Beldex-projects/belnet-gui/belnet-windows.zip")
-  set(GUI_ZIP_HASH_OPTS EXPECTED_HASH SHA256=60c2b738cf997e5684f307e5222498fd09143d495a932924105a49bf59ded8bb)
 endif()
 
 set(TUNTAP_URL "https://build.openvpn.net/downloads/releases/latest/tap-windows-latest-stable.exe")
@@ -13,8 +12,7 @@ file(DOWNLOAD
 
 file(DOWNLOAD
     ${GUI_ZIP_URL}
-    ${CMAKE_BINARY_DIR}/belnet-gui.zip
-    ${GUI_ZIP_HASH_OPTS})
+    ${CMAKE_BINARY_DIR}/belnet-gui.zip)
 
 execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${CMAKE_BINARY_DIR}/belnet-gui.zip
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

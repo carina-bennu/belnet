@@ -22,10 +22,7 @@
 #include <llarp/nodedb.hpp>
 #include <llarp/quic/tunnel.hpp>
 #include <llarp/rpc/endpoint_rpc.hpp>
-
 #include <llarp/util/str.hpp>
-#include <llarp/util/endian.hpp>
-
 #include <llarp/dns/srv_data.hpp>
 
 #include <oxenc/bt.h>
@@ -175,7 +172,11 @@ namespace llarp
         LogInfo(Name(), " setting to be not reachable by default");
       }
 
-      if (conf.m_AuthType != service::AuthType::eAuthTypeNone)
+      if (conf.m_AuthType == service::AuthType::eAuthTypeFile)
+      {
+        m_AuthPolicy = service::MakeFileAuthPolicy(m_router, conf.m_AuthFiles, conf.m_AuthFileType);
+      }
+      else if (conf.m_AuthType != service::AuthType::eAuthTypeNone)
       {
         std::string url, method;
         if (conf.m_AuthUrl.has_value() and conf.m_AuthMethod.has_value())
@@ -184,7 +185,12 @@ namespace llarp
           method = *conf.m_AuthMethod;
         }
         auto auth = std::make_shared<rpc::EndpointAuthRPC>(
-            url, method, conf.m_AuthWhitelist, Router()->lmq(), shared_from_this());
+            url,
+            method,
+            conf.m_AuthWhitelist,
+            conf.m_AuthStaticTokens,
+            Router()->lmq(),
+            shared_from_this());
         auth->Start();
         m_AuthPolicy = std::move(auth);
       }
