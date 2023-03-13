@@ -172,7 +172,6 @@ if(NOT TARGET sodium)
     target_link_libraries(sodium INTERFACE sodium_vendor)
   endif()
 
-  # Need this target export so that loki-mq properly picks up sodium
   export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
 endif()
 
@@ -193,6 +192,7 @@ endif()
 else()
   message(STATUS "using oxen-encoding submodule")
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/external/oxen-encoding)
+  add_library(oxenc::oxenc ALIAS oxenc)
 endif()
 
 

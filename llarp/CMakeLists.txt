@@ -34,7 +34,7 @@ target_link_libraries(belnet-util PUBLIC
   nlohmann_json::nlohmann_json
   filesystem
   date::date
-  oxenmq::oxenmq
+  oxenc::oxenc
 )
 
 if(ANDROID)
@@ -59,7 +59,7 @@ add_library(belnet-platform
 )
 
 target_link_libraries(belnet-platform PUBLIC belnet-cryptography belnet-util Threads::Threads base_libs uvw)
-
+target_link_libraries(belnet-platform PRIVATE oxenmq::oxenmq)
 
 if (ANDROID)
   target_sources(belnet-platform PRIVATE android/ifaddrs.c)
@@ -242,7 +242,7 @@ if(WITH_HIVE)
   )
 endif()
 
-target_link_libraries(libbelnet PUBLIC cxxopts belnet-platform belnet-util belnet-cryptography sqlite_orm ngtcp2_static)
+target_link_libraries(libbelnet PUBLIC cxxopts oxenc::oxenc belnet-platform belnet-util belnet-cryptography sqlite_orm ngtcp2_static oxenmq::oxenmq)
 target_link_libraries(libbelnet PRIVATE libunbound)
 pkg_check_modules(CRYPT libcrypt IMPORTED_TARGET)
 if(CRYPT_FOUND AND NOT CMAKE_CROSSCOMPILING)
