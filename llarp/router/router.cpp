@@ -1198,7 +1198,7 @@ namespace llarp
     // set router version if master node
     if (IsMasterNode())
     {
-      _rc.routerVersion = RouterVersion(llarp::VERSION, LLARP_PROTO_VERSION);
+      _rc.routerVersion = RouterVersion(llarp::VERSION, llarp::constants::proto_version);
     }
 
     _linkManager.ForEachInboundLink([&](LinkLayer_ptr link) {
