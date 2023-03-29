@@ -1,0 +1,6 @@
+ifFileExists $INSTDIR\bin\tuntap-install.exe 0 +2
+ExecWait '$INSTDIR\bin\tuntap-install.exe /S'
+ExecWait '$INSTDIR\bin\belnet.exe --install'
+ExecWait 'sc failure belnet reset= 60 actions= restart/1000'
+ExecWait '$INSTDIR\bin\belnet.exe -g C:\ProgramData\belnet\belnet.ini'
+CopyFiles '$INSTDIR\share\bootstrap.signed' C:\ProgramData\belnet\bootstrap.signed

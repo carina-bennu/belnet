@@ -5,19 +5,15 @@
 // -rick
 //
 // Microsoft Visual C++ generated resource script.
-//
-#include "resource.h"
-#include <constants/version.h>
+
+#define belnet_VERSION @belnet_VERSION_MAJOR@, @belnet_VERSION_MINOR@, @belnet_VERSION_PATCH@, 0
+
 #ifdef __GNUC__ // make windows rc accept this
 #include <winresrc.h>
 #endif
 /////////////////////////////////////////////////////////////////////////////
 // English (United States) resources
 
-#define STRINGIZER(version) #version
-
-#define VERSION_STRING(version, codename, revision) \
-  STRINGIZER(version) "-release [" STRINGIZER(codename) "] (rev-" STRINGIZER(revision) ")"
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 #ifdef _WIN32
@@ -56,8 +52,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION LLARP_VERSION
- PRODUCTVERSION LLARP_VERSION
+ FILEVERSION belnet_VERSION
+ PRODUCTVERSION belnet_VERSION
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x3L
@@ -75,12 +71,12 @@ BEGIN
             VALUE "Comments", "includes relay/exit functionality, such code is highly experimental on non-Linux targets"
             VALUE "CompanyName", "Beldex Foundation"
             VALUE "FileDescription", "BelNET daemon for Microsoft� Windows� NT�"
-            VALUE "FileVersion", VERSION_STRING(LLARP_VERSION_TRIPLET, LLARP_RELEASE_MOTTO, VERSIONTAG)
+            VALUE "FileVersion", "@belnet_VERSION@"
             VALUE "InternalName", "llarpd"
-            VALUE "LegalCopyright", "Copyright �2018-2020 Jeff Becker, Rick V for the Beldex Foundation. All rights reserved. This software is provided under the terms of the zlib-libpng licence; see the file LICENSE for details."
-            VALUE "OriginalFilename", "llarpd.exe"
+            VALUE "LegalCopyright", "Copyright 2018-2023 Beldex Foundation. All rights reserved. This software is provided under the terms of the zlib-libpng licence; see the file LICENSE for details."
+            VALUE "OriginalFilename", "belnet_EXE_NAME@"
             VALUE "ProductName", "BelNET for Windows"
-            VALUE "ProductVersion", VERSION_STRING(LLARP_VERSION_TRIPLET, LLARP_RELEASE_MOTTO, VERSIONTAG)
+            VALUE "ProductVersion", "@belnet_VERSION@"
         END
     END
     BLOCK "VarFileInfo"
