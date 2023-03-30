@@ -186,7 +186,7 @@ if(XSAN)
 endif()
 
 if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
-  add_definitions(-DBELNET_DEBUG=1)
+  add_definitions(-DBELNET_DEBUG)
 endif()
 
 include(cmake/coverage.cmake)
@@ -218,7 +218,7 @@ set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 
 if(TESTNET)
-  add_definitions(-DTESTNET=1)
+  add_definitions(-DTESTNET)
   # 5 times slower than realtime
   # add_definitions(-DTESTNET_SPEED=5)
 endif()
@@ -282,7 +282,7 @@ if(ANDROID)
 endif()
 
 if(WITH_HIVE)
-  add_definitions(-DBELNET_HIVE=1)
+  add_definitions(-DBELNET_HIVE)
 endif()
 
 add_subdirectory(crypto)
