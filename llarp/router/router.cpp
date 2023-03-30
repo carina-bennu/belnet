@@ -336,7 +336,8 @@ namespace llarp
         try
         {
           _identity = RpcClient()->ObtainIdentityKey();
-          LogWarn("Obtained beldexd identity keys");
+          const RouterID pk{pubkey()};
+          LogWarn("Obtained beldexd identity key: ", pk);
           break;
         }
         catch (const std::exception& e)
