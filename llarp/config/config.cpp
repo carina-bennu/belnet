@@ -431,7 +431,7 @@ namespace llarp
         },
         [this](int arg) {
           if (arg < 3 or arg > 8)
-            throw std::invalid_argument("[endpoint]:paths must be >= 2 and <= 8");
+            throw std::invalid_argument("[endpoint]:paths must be >= 3 and <= 8");
           m_Paths = arg;
         });
 
