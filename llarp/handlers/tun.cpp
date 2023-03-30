@@ -951,11 +951,7 @@ namespace llarp
           m_IfName,
           m_LocalResolverAddr.createSockAddr(),
           false /* just .bdx/.mnode DNS initially */);
-
-      if (m_OnUp)
-      {
-        m_OnUp->NotifyAsync(NotifyParams());
-      }
+          
       return HasAddress(ourAddr);
     }
 

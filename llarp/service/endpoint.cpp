@@ -27,7 +27,6 @@
 #include <llarp/util/str.hpp>
 #include <llarp/util/buffer.hpp>
 #include <llarp/util/meta/memfn.hpp>
-#include <llarp/hook/shell.hpp>
 #include <llarp/link/link_manager.hpp>
 #include <llarp/tooling/dht_event.hpp>
 #include <llarp/quic/tunnel.hpp>
@@ -342,8 +341,6 @@ namespace llarp
       EndpointUtil::StopRemoteSessions(m_state->m_RemoteSessions);
       // stop mnode sessions
       EndpointUtil::StopMnodeSessions(m_state->m_MNodeSessions);
-      if (m_OnDown)
-        m_OnDown->NotifyAsync(NotifyParams());
       return path::Builder::Stop();
     }
 
@@ -591,16 +588,6 @@ namespace llarp
       return true;
     }
 
-    Endpoint::~Endpoint()
-    {
-      if (m_OnUp)
-        m_OnUp->Stop();
-      if (m_OnDown)
-        m_OnDown->Stop();
-      if (m_OnReady)
-        m_OnReady->Stop();
-    }
-
     bool
     Endpoint::PublishIntroSet(const EncryptedIntroSet& introset, AbstractRouter* r)
     {
@@ -763,9 +750,6 @@ namespace llarp
         LogDebug(Name(), " Additional IntroSet publish confirmed");
 
       m_state->m_LastPublish = now;
-      if (m_OnReady)
-        m_OnReady->NotifyAsync(NotifyParams());
-      m_OnReady = nullptr;
     }
 
     std::optional<std::vector<RouterContact>>

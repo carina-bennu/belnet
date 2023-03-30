@@ -7,7 +7,6 @@ add_library(belnet-util
   util/buffer.cpp
   util/fs.cpp
   util/json.cpp
-  util/logging/android_logger.cpp
   util/logging/buffer.cpp
   util/logging/file_logger.cpp
   util/logging/logger.cpp
@@ -15,7 +14,6 @@ add_library(belnet-util
   util/logging/loglevel.cpp
   util/logging/ostream_logger.cpp
   util/logging/syslog_logger.cpp
-  util/logging/win32_logger.cpp
   util/belnet_init.c
   util/mem.cpp
   util/printer.cpp
@@ -38,7 +36,10 @@ target_link_libraries(belnet-util PUBLIC
 )
 
 if(ANDROID)
+  target_sources(belnet-util PRIVATE util/logging/android_logger.cpp)
   target_link_libraries(belnet-util PUBLIC log)
+elseif(WIN32)
+  target_sources(belnet-util PRIVATE util/logging/win32_logger.cpp)
 endif()
 
 add_library(belnet-platform
@@ -66,8 +67,6 @@ if (ANDROID)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  target_sources(belnet-platform PRIVATE linux/netns.cpp)
-
   if(NON_PC_TARGET)
     add_import_library(rt)
     target_link_libraries(belnet-platform PUBLIC rt)
@@ -139,7 +138,6 @@ add_library(libbelnet
   exit/session.cpp
   handlers/exit.cpp
   handlers/tun.cpp
-  hook/shell.cpp
   iwp/iwp.cpp
   iwp/linklayer.cpp
   iwp/message_buffer.cpp
