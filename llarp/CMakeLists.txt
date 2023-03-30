@@ -228,10 +228,6 @@ if(TRACY_ROOT)
   target_sources(libbelnet PRIVATE ${TRACY_ROOT}/TracyClient.cpp)
 endif()
 
-if(TESTNET)
-  target_sources(libbelnet PRIVATE testnet.c)
-endif()
-
 if(WITH_HIVE)
   target_sources(libbelnet PRIVATE
     tooling/router_hive.cpp
