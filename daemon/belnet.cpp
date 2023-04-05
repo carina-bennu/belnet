@@ -426,12 +426,6 @@ belnet_main(int argc, char* argv[])
   {
     auto result = options.parse(argc, argv);
 
-    if (result.count("verbose") > 0)
-    {
-      SetLogLevel(llarp::eLogDebug);
-      llarp::LogDebug("debug logging activated");
-    }
-
     if (result.count("help"))
     {
       std::cout << options.help() << std::endl;
