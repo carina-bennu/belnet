@@ -36,6 +36,9 @@ namespace llarp
       std::ostream&
       print(std::ostream& stream, int level, int spaces) const;
 
+      std::string
+      ToString() const;
+
       bool
       HasCNameForTLD(const std::string& tld) const;
 
@@ -46,10 +49,8 @@ namespace llarp
       RR_RData_t rData;
     };
 
-    inline std::ostream&
-    operator<<(std::ostream& out, const ResourceRecord& rr)
-    {
-      return rr.print(out, -1, -1);
-    }
   }  // namespace dns
 }  // namespace llarp
+
+template <>
+constexpr inline bool llarp::IsToStringFormattable<llarp::dns::ResourceRecord> = true;

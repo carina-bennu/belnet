@@ -38,11 +38,6 @@ namespace llarp
       return *this;
     }
 
-    friend std::ostream&
-    operator<<(std::ostream& out, const RouterID& id)
-    {
-      return out << id.ToString();
-    }
   };
 
   inline bool
@@ -50,6 +45,9 @@ namespace llarp
   {
     return lhs.as_array() == rhs.as_array();
   }
+
+  template <>
+  constexpr inline bool IsToStringFormattable<RouterID> = true;
 
 }  // namespace llarp
 

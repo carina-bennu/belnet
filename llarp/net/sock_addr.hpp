@@ -14,6 +14,7 @@
 #include <string>
 #include "net_int.hpp"
 #include <oxenc/variant.h>
+#include <llarp/util/formattable.hpp>
 
 namespace llarp
 {
@@ -61,9 +62,9 @@ namespace llarp
     SockAddr&
     operator=(const in6_addr& addr);
 
-    operator const sockaddr*() const;
-    operator const sockaddr_in*() const;
-    operator const sockaddr_in6*() const;
+    explicit operator const sockaddr*() const;
+    explicit operator const sockaddr_in*() const;
+    explicit operator const sockaddr_in6*() const;
 
     size_t
     sockaddr_len() const;
@@ -78,7 +79,7 @@ namespace llarp
     fromString(std::string_view str, bool allow_port = true);
 
     std::string
-    toString() const;
+    ToString() const;
 
     std::string
     hostString() const;
@@ -164,8 +165,8 @@ namespace llarp
     applyIPv4MapBytes();
   };
 
-  std::ostream&
-  operator<<(std::ostream& out, const SockAddr& address);
+  template <>
+  inline constexpr bool IsToStringFormattable<SockAddr> = true;
 
 }  // namespace llarp
 
