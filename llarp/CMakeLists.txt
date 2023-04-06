@@ -10,7 +10,6 @@ add_library(belnet-util
   util/logging/buffer.cpp
   util/belnet_init.c
   util/mem.cpp
-  util/printer.cpp
   util/str.cpp
   util/thread/queue_manager.cpp
   util/thread/threading.cpp
