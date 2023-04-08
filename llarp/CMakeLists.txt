@@ -28,13 +28,6 @@ target_link_libraries(belnet-util PUBLIC
   oxen::logging
 )
 
-if(ANDROID)
-  target_sources(belnet-util PRIVATE util/logging/android_logger.cpp)
-  target_link_libraries(belnet-util PUBLIC log)
-elseif(WIN32)
-  target_sources(belnet-util PRIVATE util/logging/win32_logger.cpp)
-endif()
-
 add_library(belnet-platform
   STATIC
   # for networking
