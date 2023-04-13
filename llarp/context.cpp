@@ -213,12 +213,4 @@ namespace llarp
     loop.reset();
   }
 
-#if defined(ANDROID)
-  int
-  Context::GetUDPSocket()
-  {
-    return router->GetOutboundUDPSocket();
-  }
-#endif
-
 }  // namespace llarp

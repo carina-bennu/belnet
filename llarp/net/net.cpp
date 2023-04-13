@@ -170,7 +170,7 @@ namespace llarp::net
       {
         SockAddr saddr{*addr->Address.lpSockaddr};
         if (saddr.getIP() == ip)
-          return true
+          return true;
       }
       return false;
     }
