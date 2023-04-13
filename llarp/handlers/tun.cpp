@@ -221,7 +221,7 @@ namespace llarp
       m_IfName = conf.m_ifname;
       if (m_IfName.empty())
       {
-        const auto maybe = llarp::FindFreeTun();
+        const auto maybe = m_router->Net().FindFreeTun();
         if (not maybe.has_value())
           throw std::runtime_error("cannot find free interface name");
         m_IfName = *maybe;
@@ -230,7 +230,7 @@ namespace llarp
       m_OurRange = conf.m_ifaddr;
       if (!m_OurRange.addr.h)
       {
-        const auto maybe = llarp::FindFreeRange();
+        const auto maybe = m_router->Net().FindFreeRange();
         if (not maybe.has_value())
         {
           throw std::runtime_error("cannot find free address range");
@@ -937,7 +937,7 @@ namespace llarp
       m_OurIPv6 = llarp::huint128_t{
           llarp::uint128_t{0xfd2e'6c6f'6b69'0000, llarp::net::TruncateV6(m_OurRange.addr).h}};
 #else
-      const auto maybe = GetInterfaceIPv6Address(m_IfName);
+      const auto maybe = m_router->Net().GetInterfaceIPv6Address(m_IfName);
       if (maybe.has_value())
       {
         m_OurIPv6 = *maybe;
