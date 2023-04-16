@@ -39,11 +39,6 @@ namespace llarp
             [](RouterConfig& self) { return self.m_dataDir.c_str(); },
             [](RouterConfig& self, std::string dir) { self.m_dataDir = dir; })
         .def_readwrite("blockBogons", &RouterConfig::m_blockBogons)
-        .def(
-            "overrideAddress",
-            [](RouterConfig& self, std::string addr) {
-              self.m_publicAddress = llarp::IpAddress(addr);
-            })
         .def_readwrite("workerThreads", &RouterConfig::m_workerThreads)
         .def_readwrite("numNetThreads", &RouterConfig::m_numNetThreads)
         .def_readwrite("JobQueueSize", &RouterConfig::m_JobQueueSize);
@@ -75,22 +70,12 @@ namespace llarp
         .def(py::init<>())
         .def(
             "setOutboundLink",
-            [](LinksConfig& self, std::string _interface, int family, uint16_t port) {
-              LinksConfig::LinkInfo info;
-              info.m_interface = std::move(_interface);
-              info.addressFamily = family;
-              info.port = port;
-              self.m_OutboundLink = std::move(info);
+            [](LinksConfig& self, std::string addr) {
+              self.OutboundLinks.emplace_back(std::move(addr));
             })
-        .def(
-            "addInboundLink",
-            [](LinksConfig& self, std::string _interface, int family, uint16_t port) {
-              LinksConfig::LinkInfo info;
-              info.m_interface = std::move(_interface);
-              info.addressFamily = family;
-              info.port = port;
-              self.m_InboundLinks.push_back(info);
-            });
+        .def("addInboundLink", [](LinksConfig& self, std::string addr) {
+          self.InboundListenAddrs.emplace_back(std::move(addr));
+        });
 
     py::class_<ApiConfig>(mod, "ApiConfig")
         .def(py::init<>())

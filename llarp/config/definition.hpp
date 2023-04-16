@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fmt/core.h>
 #include <initializer_list>
 #include <type_traits>
 #include <llarp/util/str.hpp>
@@ -242,12 +243,9 @@ namespace llarp
     std::optional<T>
     getValue() const
     {
-      if (parsedValues.size())
-        return parsedValues[0];
-      else if (not required and not multiValued)
-        return defaultValue;
-      else
-        return std::nullopt;
+      if (parsedValues.empty())
+        return required ? std::nullopt : defaultValue;
+      return parsedValues.front();
     }
 
     /// Returns the value at the given index.
@@ -259,8 +257,8 @@ namespace llarp
     getValueAt(size_t index) const
     {
       if (index >= parsedValues.size())
-        throw std::range_error(
-            stringify("no value at index ", index, ", size: ", parsedValues.size()));
+        throw std::range_error{
+            fmt::format("no value at index {}, size: {}", index, parsedValues.size())};
 
       return parsedValues[index];
     }
@@ -293,8 +291,8 @@ namespace llarp
     {
       if (not multiValued and parsedValues.size() > 0)
       {
-        throw std::invalid_argument(
-            stringify("duplicate value for ", name, ", previous value: ", parsedValues[0]));
+        throw std::invalid_argument{
+            fmt::format("duplicate value for {}, previous value: {}", name, parsedValues[0])};
       }
 
       parsedValues.emplace_back(fromString(input));
@@ -313,7 +311,7 @@ namespace llarp
         T t;
         iss >> t;
         if (iss.fail())
-          throw std::invalid_argument(stringify(input, " is not a valid ", typeid(T).name()));
+          throw std::invalid_argument{fmt::format("{} is not a valid {}", input, typeid(T).name())};
         else
           return t;
       }
@@ -339,24 +337,22 @@ namespace llarp
     void
     tryAccept() const override
     {
-      if (required and parsedValues.size() == 0)
+      if (required and parsedValues.empty())
       {
-        throw std::runtime_error(stringify(
-            "cannot call tryAccept() on [",
+        throw std::runtime_error{fmt::format(
+            "cannot call tryAccept() on [{}]:{} when required but no value available",
             section,
-            "]:",
-            name,
-            " when required but no value available"));
+            name)};
       }
-
-      // don't use default value if we are multi-valued and have no value
-      if (multiValued and parsedValues.size() == 0)
-        return;
 
       if (acceptor)
       {
         if (multiValued)
         {
+          // add default value in multi value mode
+          if (defaultValue and parsedValues.empty())
+            acceptor(*defaultValue);
+
           for (auto value : parsedValues)
           {
             acceptor(value);
@@ -366,13 +362,7 @@ namespace llarp
         {
           auto maybe = getValue();
           if (maybe)
-          {
             acceptor(*maybe);
-          }
-          else
-          {
-            assert(not defaultValue);  // maybe should have a value if defaultValue does
-          }
         }
       }
     }
@@ -472,8 +462,8 @@ namespace llarp
 
       auto derived = dynamic_cast<const OptionDefinition<T>*>(definition.get());
       if (not derived)
-        throw std::invalid_argument(
-            stringify("", typeid(T).name(), " is the incorrect type for [", section, "]:", name));
+        throw std::invalid_argument{
+            fmt::format("{} is the incorrect type for [{}]:{}", typeid(T).name(), section, name)};
 
       return derived->getValue();
     }
@@ -510,6 +500,14 @@ namespace llarp
     /// @throws if any option's acceptor throws
     void
     acceptAllOptions();
+
+    /// validates and accept all parsed options
+    inline void
+    process()
+    {
+      validateRequiredFields();
+      acceptAllOptions();
+    }
 
     /// Add comments for a given section. Comments are replayed in-order during config file
     /// generation. A proper comment prefix will automatically be applied, and the entire comment

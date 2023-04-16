@@ -31,12 +31,28 @@ namespace llarp
       return IPRange{net::ExpandV4(ipaddr_ipv4_bits(a, b, c, d)), netmask_ipv6_bits(mask + 96)};
     }
 
+    static inline IPRange
+    FromIPv4(net::ipv4addr_t addr, net::ipv4addr_t netmask)
+    {
+      return IPRange{
+          net::ExpandV4(ToHost(addr)), netmask_ipv6_bits(bits::count_bits(netmask) + 96)};
+    }
+
     /// return true if this iprange is in the IPv4 mapping range for containing ipv4 addresses
     constexpr bool
     IsV4() const
     {
       constexpr auto ipv4_map = IPRange{huint128_t{0x0000'ffff'0000'0000UL}, netmask_ipv6_bits(96)};
       return ipv4_map.Contains(addr);
+    }
+
+    /// get address family
+    constexpr int
+    Family() const
+    {
+      if (IsV4())
+        return AF_INET;
+      return AF_INET6;
     }
 
     /// return true if we intersect with a bogon range
@@ -101,12 +117,6 @@ namespace llarp
       return Contains(net::ExpandV4(ip));
     }
 
-    friend std::ostream&
-    operator<<(std::ostream& out, const IPRange& a)
-    {
-      return out << a.ToString();
-    }
-
     /// get the highest address on this range
     constexpr huint128_t
     HighestAddr() const
@@ -146,6 +156,9 @@ namespace llarp
     bool
     BDecode(llarp_buffer_t* buf);
   };
+
+  template <>
+  constexpr inline bool IsToStringFormattable<IPRange> = true;
 
 }  // namespace llarp
 

@@ -7,7 +7,6 @@
 #include "net.hpp"
 #include <llarp/util/bencode.h>
 #include <llarp/util/mem.h>
-#include <llarp/util/printer.hpp>
 
 #include <cstring>
 
@@ -25,6 +24,12 @@ namespace llarp
   operator<(const AddressInfo& lhs, const AddressInfo& rhs)
   {
     return lhs.rank < rhs.rank || lhs.ip < rhs.ip || lhs.port < rhs.port;
+  }
+
+  std::variant<nuint32_t, nuint128_t>
+  AddressInfo::IP() const
+  {
+    return SockAddr{ip}.getIP();
   }
 
   bool
@@ -99,7 +104,7 @@ namespace llarp
     {
       if (!bencode_read_integer(buf, &i))
         return false;
-      return i == LLARP_PROTO_VERSION;
+      return i == llarp::constants::proto_version;
     }
 
     // bad key
@@ -143,7 +148,7 @@ namespace llarp
       return false;
 
     /** version */
-    if (!bencode_write_uint64_entry(buff, "v", 1, LLARP_PROTO_VERSION))
+    if (!bencode_write_uint64_entry(buff, "v", 1, llarp::constants::proto_version))
       return false;
     /** end */
     return bencode_end(buff);
@@ -160,22 +165,17 @@ namespace llarp
   void
   AddressInfo::fromSockAddr(const SockAddr& addr)
   {
-    const sockaddr_in6* addr6 = addr;
+    const auto* addr6 = static_cast<const sockaddr_in6*>(addr);
     memcpy(ip.s6_addr, addr6->sin6_addr.s6_addr, sizeof(ip.s6_addr));
     port = addr.getPort();
   }
 
-  std::ostream&
-  AddressInfo::print(std::ostream& stream, int level, int spaces) const
+  std::string
+  AddressInfo::ToString() const
   {
-    char tmp[128] = {0};
+    char tmp[INET6_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET6, (void*)&ip, tmp, sizeof(tmp));
-
-    Printer printer(stream, level, spaces);
-    printer.printAttribute("ip", tmp);
-    printer.printAttribute("port", port);
-
-    return stream;
+    return fmt::format("[{}]:{}", tmp, port);
   }
 
   void

@@ -4,12 +4,15 @@
 #include "config/definition.hpp"
 #include "ini.hpp"
 #include <llarp/constants/files.hpp>
+#include <llarp/constants/platform.hpp>
+#include <llarp/constants/version.hpp>
 #include <llarp/net/net.hpp>
 #include <llarp/net/ip.hpp>
 #include <llarp/router_contact.hpp>
 #include <stdexcept>
 #include <llarp/util/fs.hpp>
-#include <llarp/util/logging/logger.hpp>
+#include <llarp/util/formattable.hpp>
+#include <llarp/util/logging.hpp>
 #include <llarp/util/mem.hpp>
 #include <llarp/util/str.hpp>
 
@@ -19,7 +22,6 @@
 #include <fstream>
 #include <ios>
 #include <iostream>
-#include <llarp/constants/version.hpp>
 
 namespace llarp
 {
@@ -33,6 +35,18 @@ namespace llarp
   constexpr int DefaultPublicPort = 1090;
 
   using namespace config;
+
+  namespace
+  {
+    struct ConfigGenParameters_impl : public ConfigGenParameters
+    {
+      const llarp::net::Platform*
+      Net_ptr() const
+      {
+        return llarp::net::Platform::Default_ptr();
+      }
+    };
+  }  // namespace
 
   void
   RouterConfig::defineConfigOptions(ConfigDefinition& conf, const ConfigGenParameters& params)
@@ -58,8 +72,8 @@ namespace llarp
         },
         [this](std::string arg) {
           if (arg.size() > NetID::size())
-            throw std::invalid_argument(
-                stringify("netid is too long, max length is ", NetID::size()));
+            throw std::invalid_argument{
+                fmt::format("netid is too long, max length is {}", NetID::size())};
 
           m_netId = std::move(arg);
         });
@@ -75,7 +89,8 @@ namespace llarp
         },
         [=](int arg) {
           if (arg < minConnections)
-            throw std::invalid_argument(stringify("min-connections must be >= ", minConnections));
+            throw std::invalid_argument{
+                fmt::format("min-connections must be >= {}", minConnections)};
 
           m_minConnectedRouters = arg;
         });
@@ -91,7 +106,8 @@ namespace llarp
         },
         [=](int arg) {
           if (arg < maxConnections)
-            throw std::invalid_argument(stringify("max-connections must be >= ", maxConnections));
+            throw std::invalid_argument{
+                fmt::format("max-connections must be >= {}", maxConnections)};
 
           m_maxConnectedRouters = arg;
         });
@@ -110,8 +126,8 @@ namespace llarp
           if (arg.empty())
             throw std::invalid_argument("[router]:data-dir is empty");
           if (not fs::exists(arg))
-            throw std::runtime_error(
-                stringify("Specified [router]:data-dir ", arg, " does not exist"));
+            throw std::runtime_error{
+                fmt::format("Specified [router]:data-dir {} does not exist", arg)};
 
           m_dataDir = std::move(arg);
         });
@@ -126,32 +142,22 @@ namespace llarp
             "provided the public-port option must also be specified.",
         },
         [this](std::string arg) {
-          if (not arg.empty())
-          {
-            llarp::LogInfo("public ip ", arg, " size ", arg.size());
+          if (arg.empty())
+            return;
+          nuint32_t addr{};
+          if (not addr.FromString(arg))
+            throw std::invalid_argument{fmt::format("{} is not a valid IPv4 address", arg)};
+          if (IsIPv4Bogon(addr))
+            throw std::invalid_argument{
+                fmt::format("{} is not a publicly routable ip address", addr)};
 
-            if (arg.size() > 15)
-              throw std::invalid_argument(stringify("Not a valid IPv4 addr: ", arg));
-
-            m_publicAddress.setAddress(arg);
-          }
+          PublicIP = addr;
         });
 
-    conf.defineOption<std::string>("router", "public-address", Hidden, [this](std::string arg) {
-      if (not arg.empty())
-      {
-        llarp::LogWarn(
-            "*** WARNING: The config option [router]:public-address=",
-            arg,
-            " is deprecated, use public-ip=",
-            arg,
-            " instead to avoid this warning and avoid future configuration problems.");
-
-        if (arg.size() > 15)
-          throw std::invalid_argument(stringify("Not a valid IPv4 addr: ", arg));
-
-        m_publicAddress.setAddress(arg);
-      }
+    conf.defineOption<std::string>("router", "public-address", Hidden, [](std::string) {
+      throw std::invalid_argument{
+          "[router]:public-address option no longer supported, use [router]:public-ip and "
+          "[router]:public-port instead"};
     });
 
     conf.defineOption<int>(
@@ -166,8 +172,7 @@ namespace llarp
         [this](int arg) {
           if (arg <= 0 || arg > std::numeric_limits<uint16_t>::max())
             throw std::invalid_argument("public-port must be >= 0 and <= 65536");
-
-          m_publicAddress.setPort(arg);
+          PublicPort = ToNet(huint16_t{static_cast<uint16_t>(arg)});
         });
 
     conf.defineOption<int>(
@@ -363,7 +368,7 @@ namespace llarp
         [this](std::string arg) {
           service::Address addr;
           if (not addr.FromString(arg))
-            throw std::invalid_argument(stringify("bad beldex address: ", arg));
+            throw std::invalid_argument{fmt::format("bad beldex address: {}", arg)};
           m_AuthWhitelist.emplace(std::move(addr));
         });
         
@@ -380,7 +385,7 @@ namespace llarp
         [this](fs::path arg) {
           if (not fs::exists(arg))
             throw std::invalid_argument{
-                stringify("cannot load auth file ", arg, " as it does not seem to exist")};
+                fmt::format("cannot load auth file {}: file does not exist", arg)};
           m_AuthFiles.emplace(std::move(arg));
         });
 
@@ -416,7 +421,7 @@ namespace llarp
         ReachableDefault,
         AssignmentAcceptor(m_reachable),
         Comment{
-            "Determines whether we will publish our mnapp's introset to the DHT.",
+            "Determines whether we will pubish our mnapp's introset to the DHT.",
         });
 
     conf.defineOption<int>(
@@ -442,7 +447,7 @@ namespace llarp
         },
         [this](int arg) {
           if (arg < 3 or arg > 8)
-            throw std::invalid_argument("[endpoint]:paths must be >= 2 and <= 8");
+            throw std::invalid_argument("[endpoint]:paths must be >= 3 and <= 8");
           m_Paths = arg;
         });
 
@@ -531,7 +536,7 @@ namespace llarp
 
           if (arg != "null" and not exit.FromString(arg))
           {
-            throw std::invalid_argument(stringify("[network]:exit-node bad address: ", arg));
+            throw std::invalid_argument{fmt::format("[network]:exit-node bad address: {}", arg)};
           }
           m_ExitMap.Insert(range, exit);
         });
@@ -622,7 +627,7 @@ namespace llarp
         [this](std::string arg) {
           if (not m_ifaddr.FromString(arg))
           {
-            throw std::invalid_argument(stringify("[network]:ifaddr invalid value: '", arg, "'"));
+            throw std::invalid_argument{fmt::format("[network]:ifaddr invalid value: '{}'", arg)};
           }
         });
 
@@ -649,8 +654,8 @@ namespace llarp
           }
           m_baseV6Address = huint128_t{};
           if (not m_baseV6Address->FromString(arg))
-            throw std::invalid_argument(
-                stringify("[network]:ip6-range invalid value: '", arg, "'"));
+            throw std::invalid_argument{
+                fmt::format("[network]:ip6-range invalid value: '{}'", arg)};
         });
     // TODO: could be useful for mnodes in the future, but currently only implemented for clients:
     conf.defineOption<std::string>(
@@ -672,7 +677,7 @@ namespace llarp
           const auto pos = arg.find(":");
           if (pos == std::string::npos)
           {
-            throw std::invalid_argument(stringify("[endpoint]:mapaddr invalid entry: ", arg));
+            throw std::invalid_argument{fmt::format("[endpoint]:mapaddr invalid entry: {}", arg)};
           }
           std::string addrstr = arg.substr(0, pos);
           std::string ipstr = arg.substr(pos + 1);
@@ -681,18 +686,19 @@ namespace llarp
             huint32_t ipv4;
             if (not ipv4.FromString(ipstr))
             {
-              throw std::invalid_argument(stringify("[endpoint]:mapaddr invalid ip: ", ipstr));
+              throw std::invalid_argument{fmt::format("[endpoint]:mapaddr invalid ip: {}", ipstr)};
             }
             ip = net::ExpandV4(ipv4);
           }
           if (not addr.FromString(addrstr))
           {
-            throw std::invalid_argument(
-                stringify("[endpoint]:mapaddr invalid addresss: ", addrstr));
+            throw std::invalid_argument{
+                fmt::format("[endpoint]:mapaddr invalid addresss: {}", addrstr)};
           }
           if (m_mapAddrs.find(ip) != m_mapAddrs.end())
           {
-            throw std::invalid_argument(stringify("[endpoint]:mapaddr ip already mapped: ", ipstr));
+            throw std::invalid_argument{
+                fmt::format("[endpoint]:mapaddr ip already mapped: {}", ipstr)};
           }
           m_mapAddrs[ip] = addr;
         });
@@ -709,11 +715,11 @@ namespace llarp
         [this](std::string arg) {
           RouterID id;
           if (not id.FromString(arg))
-            throw std::invalid_argument(stringify("Invalid RouterID: ", arg));
+            throw std::invalid_argument{fmt::format("Invalid RouterID: {}", arg)};
 
           auto itr = m_mnodeBlacklist.emplace(std::move(id));
           if (not itr.second)
-            throw std::invalid_argument(stringify("Duplicate blacklist-mnode: ", arg));
+            throw std::invalid_argument{fmt::format("Duplicate blacklist-mnode: {}", arg)};
         });
 
     // TODO: support SRV records for routers, but for now client only
@@ -730,7 +736,7 @@ namespace llarp
         [this](std::string arg) {
           llarp::dns::SRVData newSRV;
           if (not newSRV.fromString(arg))
-            throw std::invalid_argument(stringify("Invalid SRV Record string: ", arg));
+            throw std::invalid_argument{fmt::format("Invalid SRV Record string: {}", arg)};
 
           m_SRVRecords.push_back(std::move(newSRV));
         });
@@ -836,7 +842,7 @@ namespace llarp
             return;
           if (not fs::exists(path))
             throw std::invalid_argument{
-                stringify("cannot add hosts file ", path, " as it does not seem to exist")};
+                fmt::format("cannot add hosts file {} as it does not exist", path)};
           m_hostfiles.emplace_back(std::move(path));
         });
 
@@ -852,111 +858,168 @@ namespace llarp
         });
   }
 
-  LinksConfig::LinkInfo
-  LinksConfig::LinkInfoFromINIValues(std::string_view name, std::string_view value)
-  {
-    // we treat the INI k:v pair as:
-    // k: interface name, * indicating outbound
-    // v: a comma-separated list of values, an int indicating port (everything else ignored)
-    //    this is somewhat of a backwards- and forwards-compatibility thing
-
-    LinkInfo info;
-    info.port = 0;
-    info.addressFamily = AF_INET;
-
-    if (name == "address")
-    {
-      const IpAddress addr{value};
-      if (not addr.hasPort())
-        throw std::invalid_argument("no port provided in link address");
-      info.m_interface = addr.toHost();
-      info.port = *addr.getPort();
-    }
-    else
-    {
-      info.m_interface = std::string{name};
-
-      std::vector<std::string_view> splits = split(value, ",");
-      for (std::string_view str : splits)
-      {
-        int asNum = std::atoi(str.data());
-        if (asNum > 0)
-          info.port = asNum;
-
-        // otherwise, ignore ("future-proofing")
-      }
-    }
-
-    return info;
-  }
-
   void
   LinksConfig::defineConfigOptions(ConfigDefinition& conf, const ConfigGenParameters& params)
   {
-    constexpr Default DefaultOutboundLinkValue{"0"};
-
     conf.addSectionComments(
         "bind",
         {
-            "This section specifies network interface names and/or IPs as keys, and",
-            "ports as values to control the address(es) on which Belnet listens for",
-            "incoming data.",
+            "Typically this section can be left blank, but can be used to specify which sockets to "
+            "bind on for inbound and outbound traffic.",
+            "",
+            "If no inbound bind addresses are configured then belnet will search for a local ",
+            "network interface with a public IP address and use that IP with port 1090.",
+            "If no outbound bind addresses are configured then belnet will use a wildcard "
+            "address.",
             "",
             "Examples:",
             "",
-            "    eth0=1090",
-            "    0.0.0.0=1090",
-            "    1.2.3.4=1090",
+            "    inbound=15.5.29.5:443",
+            "    inbound=10.0.2.2",
+            "    outbound=0.0.0.0:9000",
             "",
-            "The first bind to port 1090 on the network interface 'eth0'; the second binds",
-            "to port 1090 on all local network interfaces; and the third example binds to",
-            "port 1090 on the given IP address.",
+            "The first binds an inbound socket on local ip 15.5.29.5  with port 443; and the "
+            "second binds an inbound socket on local ip 10.0.2.2 with the default port, 1090; and "
+            "the third example binds an outbound socket on all interfaces with a pinned outbound "
+            "port on port 9000.",
             "",
-            "If a private range IP address (or an interface with a private IP) is given, or",
-            "if the 0.0.0.0 all-address IP is given then you must also specify the",
-            "public-ip= and public-port= settings in the [router] section with a public",
-            "address at which this router can be reached.",
-            ""
-            "Typically this section can be left blank: if no inbound bind addresses are",
-            "configured then belnet will search for a local network interface with a public",
-            "IP address and use that (with port 1090).",
+            "Inbound sockets with a wildcard address or private range IP address (like the second "
+            "example entry) will require setting the public-ip= and public-port= settings with a "
+            "public address at which this router can be reached.",
+            "Inbound sockets can NOT have ports explicitly set to be 0.",
+            "",
+            "On setups with multiple public ip addresses on a network interface, the first ip will "
+            "be used as a default or when a wildcard is provided, unless explicitly set in config.",
+            "Setting the IP for both inbound and outbound sockets on machines with multiple public "
+            "ip addresses is highly recommended.",
+        });
+
+    const auto* net_ptr = params.Net_ptr();
+
+    static constexpr Default DefaultInboundPort{uint16_t{1090}};
+    static constexpr Default DefaultOutboundPort{uint16_t{0}};
+
+    conf.defineOption<std::string>(
+        "bind",
+        "public-ip",
+        RelayOnly,
+        Comment{"set our public ip if it is different than the one we detect or if we are unable "
+                "to detect it"},
+        [this](std::string_view arg) {
+          SockAddr pubaddr{arg};
+          PublicAddress = pubaddr.getIP();
+        });
+    conf.defineOption<uint16_t>(
+        "bind",
+        "public-port",
+        RelayOnly,
+        Comment{"set our public port if it is different than the one we detect or if we are unable "
+                "to detect it"},
+        [this](uint16_t arg) { PublicPort = net::port_t::from_host(arg); });
+
+    auto parse_addr_for_link = [net_ptr](const std::string& arg, net::port_t default_port) {
+      std::optional<SockAddr> addr = std::nullopt;
+      // explicitly provided value
+      if (not arg.empty())
+      {
+        if (arg[0] == ':')
+        {
+          // port only case
+          auto port = net::port_t::from_string(arg.substr(1));
+          addr = net_ptr->WildcardWithPort(port);
+        }
+        else
+        {
+          addr = SockAddr{arg};
+          if (net_ptr->IsLoopbackAddress(addr->getIP()))
+            throw std::invalid_argument{fmt::format("{} is a loopback address", arg)};
+        }
+      }
+      if (not addr)
+      {
+        // infer public address
+        if (auto maybe_ifname = net_ptr->GetBestNetIF())
+          addr = net_ptr->GetInterfaceAddr(*maybe_ifname);
+      }
+
+      if (addr)
+      {
+        // set port if not explicitly provided
+        if (addr->getPort() == 0)
+          addr->setPort(default_port);
+      }
+      return addr;
+    };
+
+    conf.defineOption<std::string>(
+        "bind",
+        "inbound",
+        RelayOnly,
+        MultiValue,
+        Comment{""},
+        [this, parse_addr_for_link](const std::string& arg) {
+          auto default_port = net::port_t::from_host(DefaultInboundPort.val);
+          if (auto addr = parse_addr_for_link(arg, default_port))
+            InboundListenAddrs.emplace_back(std::move(*addr));
         });
 
     conf.defineOption<std::string>(
         "bind",
-        "*",
-        DefaultOutboundLinkValue,
-        Comment{
-            "Specify a source port for **outgoing** Belnet traffic, for example if you want to",
-            "set up custom firewall rules based on the originating port. Typically this should",
-            "be left unset to automatically choose random source ports.",
-        },
-        [this](std::string arg) { m_OutboundLink = LinkInfoFromINIValues("*", arg); });
+        "outbound",
+        MultiValue,
+        Comment{""},
+        [this, net_ptr, parse_addr_for_link](const std::string& arg) {
+          auto default_port = net::port_t::from_host(DefaultOutboundPort.val);
+          auto addr = parse_addr_for_link(arg, default_port);
+          if (not addr)
+            addr = net_ptr->WildcardWithPort(default_port);
+          OutboundLinks.emplace_back(std::move(*addr));
+        });
 
-    if (params.isRelay)
-    {
-      if (std::string best_if; GetBestNetIF(best_if))
-        m_InboundLinks.push_back(LinkInfoFromINIValues(best_if, std::to_string(DefaultPublicPort)));
-    }
-    conf.addUndeclaredHandler(
-        "bind",
-        [&, defaulted = true](
-            std::string_view, std::string_view name, std::string_view value) mutable {
-          if (defaulted)
+          
+
+        conf.addUndeclaredHandler(
+        "bind", [this, net_ptr](std::string_view, std::string_view key, std::string_view val) {
+          LogError(
+              "using the [bind] section without inbound= or outbound= is deprecated and will stop "
+              "working in a future release");
+          std::optional<SockAddr> addr;
+          // special case: wildcard for outbound
+          if (key == "*")
           {
-            m_InboundLinks.clear();  // Clear the default
-            defaulted = false;
+            addr = net_ptr->Wildcard();
+            // set port, zero is acceptable here.
+            if (auto port = std::stoi(std::string{val});
+                port < std::numeric_limits<uint16_t>::max())
+            {
+              addr->setPort(port);
+            }
+            else
+              throw std::invalid_argument{fmt::format("invalid port value: '{}'", val)};
+            OutboundLinks.emplace_back(std::move(*addr));
+            return;
           }
+          // try as interface name first
+          addr = net_ptr->GetInterfaceAddr(key, AF_INET);
+          if (addr and net_ptr->IsLoopbackAddress(addr->getIP()))
+            throw std::invalid_argument{fmt::format("{} is a loopback interface", key)};
+          // try as ip address next, throws if unable to parse
+          if (not addr)
+          {
+            addr = SockAddr{key, huint16_t{0}};
+            if (net_ptr->IsLoopbackAddress(addr->getIP()))
+              throw std::invalid_argument{fmt::format("{} is a loopback address", key)};
+          }
+          // parse port and set if acceptable non zero value
+          if (auto port = std::stoi(std::string{val});
+              port and port < std::numeric_limits<uint16_t>::max())
+          {
+            addr->setPort(port);
+          }
+          else
+            throw std::invalid_argument{fmt::format("invalid port value: '{}'", val)};
 
-          LinkInfo info = LinkInfoFromINIValues(name, value);
-
-          if (info.port <= 0)
-            throw std::invalid_argument(
-                stringify("Invalid [bind] port specified on interface", name));
-
-          assert(name != "*");  // handled by defineOption("bind", "*", ...) above
-
-          m_InboundLinks.emplace_back(std::move(info));
+          InboundListenAddrs.emplace_back(std::move(*addr));
         });
   }
 
@@ -969,14 +1032,11 @@ namespace llarp
         "connect", [this](std::string_view section, std::string_view name, std::string_view value) {
           fs::path file{value.begin(), value.end()};
           if (not fs::exists(file))
-            throw std::runtime_error(stringify(
-                "Specified bootstrap file ",
+            throw std::runtime_error{fmt::format(
+                "Specified bootstrap file {} specified in [{}]:{} does not exist",
                 value,
-                "specified in [",
                 section,
-                "]:",
-                name,
-                " does not exist"));
+                name)};
 
           routers.emplace_back(std::move(file));
           return true;
@@ -1107,38 +1167,28 @@ namespace llarp
   {
     (void)params;
 
-    constexpr Default DefaultLogType{"file"};
+    constexpr Default DefaultLogType{
+        platform::is_android or platform::is_apple ? "system" : "print"};
     constexpr Default DefaultLogFile{""};
-    constexpr Default DefaultLogLevel{"warn"};
+    const Default DefaultLogLevel{params.isRelay ? "warn" : "info"};
 
     conf.defineOption<std::string>(
         "logging",
         "type",
         DefaultLogType,
-        [this](std::string arg) {
-          LogType type = LogTypeFromString(arg);
-          if (type == LogType::Unknown)
-            throw std::invalid_argument(stringify("invalid log type: ", arg));
-
-          m_logType = type;
-        },
+        [this](std::string arg) { m_logType = log::type_from_string(arg); },
         Comment{
             "Log type (format). Valid options are:",
-            "  file - plaintext formatting",
-            "  syslog - logs directed to syslog",
+            "  print - print logs to standard output",
+            "  system - logs directed to the system logger (syslog/eventlog/etc.)",
+            "  file - plaintext formatting to a file",
         });
 
     conf.defineOption<std::string>(
         "logging",
         "level",
         DefaultLogLevel,
-        [this](std::string arg) {
-          std::optional<LogLevel> level = LogLevelFromString(arg);
-          if (not level)
-            throw std::invalid_argument(stringify("invalid log level value: ", arg));
-
-          m_logLevel = *level;
-        },
+        [this](std::string arg) { m_logLevel = log::level_from_string(arg); },
         Comment{
             "Minimum log level to print. Logging below this level will be ignored.",
             "Valid log levels, in ascending order, are:",
@@ -1147,6 +1197,8 @@ namespace llarp
             "  info",
             "  warn",
             "  error",
+            "  critical",
+            "  none",
         });
 
     conf.defineOption<std::string>(
@@ -1155,9 +1207,7 @@ namespace llarp
         DefaultLogFile,
         AssignmentAcceptor(m_logFile),
         Comment{
-            "When using type=file this is the output filename. If given the value 'stdout' or",
-            "left empty then logging is printed as standard output rather than written to a",
-            "file.",
+            "When using type=file this is the output filename.",
         });
   }
 
@@ -1226,8 +1276,14 @@ namespace llarp
     return true;
   }
 
-  Config::Config(fs::path datadir)
-      : m_DataDir(datadir.empty() ? fs::current_path() : std::move(datadir))
+  std::unique_ptr<ConfigGenParameters>
+  Config::MakeGenParams() const
+  {
+    return std::make_unique<ConfigGenParameters_impl>();
+  }
+
+  Config::Config(std::optional<fs::path> datadir)
+      : m_DataDir{datadir ? std::move(*datadir) : fs::current_path()}
   {}
 
   constexpr auto GetOverridesDir = [](auto datadir) -> fs::path { return datadir / "conf.d"; };
@@ -1270,19 +1326,43 @@ namespace llarp
   }
 
   bool
+  Config::LoadString(std::string_view ini, bool isRelay)
+  {
+    auto params = MakeGenParams();
+    params->isRelay = isRelay;
+    params->defaultDataDir = m_DataDir;
+    ConfigDefinition conf{isRelay};
+    initializeConfig(conf, *params);
+
+    m_Parser.Clear();
+    if (not m_Parser.LoadFromStr(ini))
+      return false;
+
+    m_Parser.IterAll([&](std::string_view section, const SectionValues_t& values) {
+      for (const auto& pair : values)
+      {
+        conf.addConfigValue(section, pair.first, pair.second);
+      }
+    });
+
+    conf.process();
+
+    return true;
+  }
+
+  bool
   Config::Load(std::optional<fs::path> fname, bool isRelay)
   {
     if (not fname.has_value())
       return LoadDefault(isRelay);
     try
     {
-      ConfigGenParameters params;
-      params.isRelay = isRelay;
-      params.defaultDataDir = m_DataDir;
+      auto params = MakeGenParams();
+      params->isRelay = isRelay;
+      params->defaultDataDir = m_DataDir;
 
       ConfigDefinition conf{isRelay};
-      initializeConfig(conf, params);
-      addBackwardsCompatibleConfigOptions(conf);
+      initializeConfig(conf, *params);
       m_Parser.Clear();
       if (!m_Parser.LoadFile(*fname))
       {
@@ -1297,7 +1377,7 @@ namespace llarp
         }
       });
 
-      conf.acceptAllOptions();
+      conf.process();
 
       return true;
     }
@@ -1311,39 +1391,7 @@ namespace llarp
   bool
   Config::LoadDefault(bool isRelay)
   {
-    try
-    {
-      ConfigGenParameters params;
-      params.isRelay = isRelay;
-      params.defaultDataDir = m_DataDir;
-      ConfigDefinition conf{isRelay};
-      initializeConfig(conf, params);
-
-      m_Parser.Clear();
-      LoadOverrides();
-
-      /// load additional config options added
-      for (const auto& [sect, key, val] : m_Additional)
-      {
-        conf.addConfigValue(sect, key, val);
-      }
-
-      m_Parser.IterAll([&](std::string_view section, const SectionValues_t& values) {
-        for (const auto& pair : values)
-        {
-          conf.addConfigValue(section, pair.first, pair.second);
-        }
-      });
-
-      conf.acceptAllOptions();
-
-      return true;
-    }
-    catch (const std::exception& e)
-    {
-      LogError("Error trying to init default config: ", e.what());
-      return false;
-    }
+    return LoadString("", isRelay);
   }
 
   void
@@ -1409,7 +1457,7 @@ namespace llarp
     // open a filestream
     auto stream = llarp::util::OpenFileStream<std::ofstream>(confFile.c_str(), std::ios::binary);
     if (not stream or not stream->is_open())
-      throw std::runtime_error(stringify("Failed to open file ", confFile, " for writing"));
+      throw std::runtime_error{fmt::format("Failed to open file {} for writing", confFile)};
 
     *stream << confStr;
     stream->flush();
@@ -1466,12 +1514,12 @@ namespace llarp
   std::string
   Config::generateBaseClientConfig()
   {
-    ConfigGenParameters params;
-    params.isRelay = false;
-    params.defaultDataDir = m_DataDir;
+    auto params = MakeGenParams();
+    params->isRelay = false;
+    params->defaultDataDir = m_DataDir;
 
     llarp::ConfigDefinition def{false};
-    initializeConfig(def, params);
+    initializeConfig(def, *params);
     generateCommonConfigComments(def);
     def.addSectionComments(
         "paths",
@@ -1491,12 +1539,12 @@ namespace llarp
   std::string
   Config::generateBaseRouterConfig()
   {
-    ConfigGenParameters params;
-    params.isRelay = true;
-    params.defaultDataDir = m_DataDir;
+    auto params = MakeGenParams();
+    params->isRelay = true;
+    params->defaultDataDir = m_DataDir;
 
     llarp::ConfigDefinition def{true};
-    initializeConfig(def, params);
+    initializeConfig(def, *params);
     generateCommonConfigComments(def);
 
     // beldexd
@@ -1512,9 +1560,9 @@ namespace llarp
   std::shared_ptr<Config>
   Config::EmbeddedConfig()
   {
-    auto config = std::make_shared<Config>(fs::path{});
+    auto config = std::make_shared<Config>();
     config->Load();
-    config->logging.m_logLevel = eLogNone;
+    config->logging.m_logLevel = log::Level::off;
     config->api.m_enableRPCServer = false;
     config->network.m_endpointType = "null";
     config->network.m_saveProfiles = false;

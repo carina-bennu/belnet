@@ -77,24 +77,25 @@ extern "C"
   JNIEXPORT void JNICALL
   Java_network_beldex_belnet_BelnetDaemon_InjectVPNFD(JNIEnv* env, jobject self)
   {
-    auto ptr = GetImpl<llarp::Context>(env, self);
-
-    ptr->androidFD = GetObjectMemberAsInt<int>(env, self, "m_FD");
+    if (auto ptr = GetImpl<llarp::Context>(env, self))
+      ptr->androidFD = GetObjectMemberAsInt<int>(env, self, "m_FD");
   }
 
   JNIEXPORT jint JNICALL
   Java_network_beldex_belnet_BelnetDaemon_GetUDPSocket(JNIEnv* env, jobject self)
   {
     auto ptr = GetImpl<llarp::Context>(env, self);
+    if (const auto& router = ptr->router; ptr and ptr->router)
+      return router->OutboundUDPSocket();
+    return -1;
 
-    return ptr->GetUDPSocket();
   }
 
   JNIEXPORT jstring JNICALL
   Java_network_beldex_belnet_BelnetDaemon_DetectFreeRange(JNIEnv* env, jclass)
   {
     std::string rangestr{};
-    if (auto maybe = llarp::FindFreeRange())
+    if (auto maybe = llarp::net::Platform::Default_ptr()->FindFreeRange())
     {
       rangestr = maybe->ToString();
     }

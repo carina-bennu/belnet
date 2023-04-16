@@ -57,7 +57,6 @@ else()
 endif()
 
 enable_lto(belnet-cryptography)
-add_log_tag(belnet-cryptography)
 
 if (WARNINGS_AS_ERRORS)
   target_compile_options(belnet-cryptography PUBLIC -Wall -Wextra -Werror)

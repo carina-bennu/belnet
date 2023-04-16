@@ -1,5 +1,6 @@
 #include "rpc_server.hpp"
 #include <llarp/router/route_poker.hpp>
+#include <llarp/constants/platform.hpp>
 #include <llarp/constants/version.hpp>
 #include <nlohmann/json.hpp>
 #include <llarp/exit/context.hpp>
@@ -202,7 +203,7 @@ namespace llarp::rpc
                     auto [addr, id] = quic->open(
                         remoteHost, port, [](auto&&) {}, laddr);
                     util::StatusObject status;
-                    status["addr"] = addr.toString();
+                    status["addr"] = addr.ToString();
                     status["id"] = id;
                     reply(CreateJSONResponse(status));
                   }
@@ -432,11 +433,25 @@ namespace llarp::rpc
                 const auto range_itr = obj.find("range");
                 if (range_itr == obj.end())
                 {
-                  range.FromString("0.0.0.0/0");
+                  // platforms without ipv6 support will shit themselves
+                  // here if we give them an exit mapping that is ipv6
+                  if constexpr (platform::supports_ipv6)
+                  {
+                    range.FromString("::/0");
+                  }
+                  else
+                  {
+                    range.FromString("0.0.0.0/0");
+                  }
                 }
                 else if (not range.FromString(range_itr->get<std::string>()))
                 {
                   reply(CreateJSONError("invalid ip range"));
+                  return;
+                }
+                if (not platform::supports_ipv6 and not range.IsV4())
+                {
+                  reply(CreateJSONError("ipv6 ranges not supported on this platform"));
                   return;
                 }
                 std::optional<std::string> token;
@@ -618,7 +633,7 @@ namespace llarp::rpc
               {
                 if (not itr->is_object())
                 {
-                  reply(CreateJSONError(stringify("override is not an object")));
+                  reply(CreateJSONError("override is not an object"));
                   return;
                 }
                 for (const auto& [section, value] : itr->items())
@@ -626,15 +641,15 @@ namespace llarp::rpc
                   if (not value.is_object())
                   {
                     reply(CreateJSONError(
-                        stringify("failed to set [", section, "] section is not an object")));
+                        fmt::format("failed to set [{}]: section is not an object", section)));
                     return;
                   }
                   for (const auto& [key, value] : value.items())
                   {
                     if (not value.is_string())
                     {
-                      reply(CreateJSONError(stringify(
-                          "failed to set [", section, "]:", key, " value is not a string")));
+                      reply(CreateJSONError(fmt::format(
+                          "failed to set [{}]:{}: value is not a string", section, key)));
                       return;
                     }
                     r->GetConfig()->Override(section, key, value.get<std::string>());

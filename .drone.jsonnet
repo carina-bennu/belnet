@@ -334,7 +334,7 @@ local mac_builder(name,
     // Deb builds:
     deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid'),
     deb_builder(docker_base + 'debian-bullseye-builder', 'bullseye', 'debian/bullseye'),
-    deb_builder(docker_base + 'ubuntu-impish-builder', 'impish', 'ubuntu/impish'),
+    deb_builder(docker_base + 'ubuntu-jammy-builder', 'jammy', 'ubuntu/jammy'),
     deb_builder(docker_base + 'ubuntu-focal-builder', 'focal', 'ubuntu/focal'),
     deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid', arch='arm64'),
 

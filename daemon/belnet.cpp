@@ -3,8 +3,6 @@
 #include <llarp.hpp>
 #include <llarp/util/belnet_init.h>
 #include <llarp/util/fs.hpp>
-#include <llarp/util/logging/logger.hpp>
-#include <llarp/util/logging/ostream_logger.hpp>
 #include <llarp/util/str.hpp>
 
 #ifdef _WIN32
@@ -308,7 +306,6 @@ TellWindowsServiceStopped()
     else
       llarp::LogError("SetServiceStatus failed with an unknown error.");
   }
-  llarp::LogContext::Instance().ImmediateFlush();
 }
 
 class WindowsServiceStopped
@@ -379,11 +376,14 @@ main(int argc, char* argv[])
 int
 belnet_main(int argc, char* argv[])
 {
-  auto result = Belnet_INIT();
-  if (result)
-  {
+  if (auto result = Belnet_INIT())
     return result;
-  }
+
+  // Set up a default, stderr logging for very early logging; we'll replace this later once we read
+  // the desired log info from config.
+  llarp::log::add_sink(llarp::log::Type::Print, "stderr");
+  llarp::log::reset_level(llarp::log::Level::info);
+
   llarp::RuntimeOptions opts;
 
 #ifdef _WIN32
@@ -410,7 +410,6 @@ belnet_main(int argc, char* argv[])
       ("g,generate", "generate client config", cxxopts::value<bool>())
       ("r,router", "run as router instead of client", cxxopts::value<bool>())
       ("f,force", "overwrite", cxxopts::value<bool>())
-      ("c,colour", "colour output", cxxopts::value<bool>()->default_value("true"))
       ("b,background", "background mode (start, but do not connect to the network)",
        cxxopts::value<bool>())
       ("config", "path to configuration file", cxxopts::value<std::string>())
@@ -425,18 +424,6 @@ belnet_main(int argc, char* argv[])
   try
   {
     auto result = options.parse(argc, argv);
-
-    if (result.count("verbose") > 0)
-    {
-      SetLogLevel(llarp::eLogDebug);
-      llarp::LogDebug("debug logging activated");
-    }
-
-    if (!result["colour"].as<bool>())
-    {
-      llarp::LogContext::Instance().logStream =
-          std::make_unique<llarp::OStreamLogStream>(false, std::cerr);
-    }
 
     if (result.count("help"))
     {
@@ -567,6 +554,7 @@ belnet_main(int argc, char* argv[])
     // do periodic non belnet related tasks here
     if (ctx and ctx->IsUp() and not ctx->LooksAlive())
     {
+      auto deadlock_cat = llarp::log::Cat("deadlock");
       for (const auto& wtf :
            {"you have been visited by the mascott of the deadlocked router.",
             "⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⣀⣴⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣄⠄⠄⠄⠄",
@@ -588,8 +576,8 @@ belnet_main(int argc, char* argv[])
             "file a bug report now or be cursed with this "
             "annoying image in your syslog for all time."})
       {
-        llarp::LogError{wtf};
-        llarp::LogContext::Instance().ImmediateFlush();
+        llarp::log::critical(deadlock_cat, wtf);
+        llarp::log::flush();
       }
 #ifdef _WIN32
       TellWindowsServiceStopped();
@@ -617,7 +605,7 @@ belnet_main(int argc, char* argv[])
     code = 2;
   }
 
-  llarp::LogContext::Instance().ImmediateFlush();
+  llarp::log::flush();
   if (ctx)
   {
     ctx.reset();

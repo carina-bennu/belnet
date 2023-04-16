@@ -34,15 +34,7 @@ if(APPLE)
     set(BELNET_APPLE_BUILD 0)
 endif()
 
-set(RELEASE_MOTTO "A Series of Tubes" CACHE STRING "Release motto")
-
-add_definitions(-DLLARP_VERSION_MAJOR=${belnet_VERSION_MAJOR})
-add_definitions(-DLLARP_VERSION_MINOR=${belnet_VERSION_MINOR})
-add_definitions(-DLLARP_VERSION_PATCH=${belnet_VERSION_PATCH})
-if(RELEASE_MOTTO AND CMAKE_BUILD_TYPE MATCHES "[Rr][Ee][Ll][Ee][Aa][Ss][Ee]")
-  add_definitions(-DLLARP_RELEASE_MOTTO="${RELEASE_MOTTO}")
-endif()
-
+set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -52,14 +44,11 @@ option(USE_NETNS "enable networking namespace support. Linux only" OFF)
 option(NATIVE_BUILD "optimise for host system and FPU" ON)
 option(EMBEDDED_CFG "optimise for older hardware or embedded systems" OFF)
 option(BUILD_LIBBELNET "build libbelnet.so" ON)
-option(SHADOW "use shadow testing framework. linux only" OFF)
 option(XSAN "use sanitiser, if your system has it (requires -DCMAKE_BUILD_TYPE=Debug)" OFF)
 option(USE_JEMALLOC "Link to jemalloc for memory allocations, if found" ON)
 option(TESTNET "testnet build" OFF)
 option(WITH_COVERAGE "generate coverage data" OFF)
-option(USE_SHELLHOOKS "enable shell hooks on compile time (dangerous)" OFF)
 option(WARNINGS_AS_ERRORS "treat all warnings as errors. turn off for development, on for release" OFF)
-option(TRACY_ROOT "include tracy profiler source" OFF)
 option(WITH_TESTS "build unit tests" OFF)
 option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
@@ -100,15 +89,12 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 include(cmake/target_link_libraries_system.cmake)
 include(cmake/add_import_library.cmake)
-include(cmake/add_log_tag.cmake)
 include(cmake/libatomic.cmake)
 
 if (STATIC_LINK)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_STATIC_LIBRARY_SUFFIX})
   message(STATUS "setting static library suffix search")
 endif()
-
-add_definitions(-D${CMAKE_SYSTEM_NAME})
 
 include(cmake/solaris.cmake)
 include(cmake/win32.cmake)
@@ -172,55 +158,17 @@ if(NOT TARGET sodium)
     target_link_libraries(sodium INTERFACE sodium_vendor)
   endif()
 
-  # Need this target export so that loki-mq properly picks up sodium
   export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
 endif()
 
 
-option(FORCE_OXENC_SUBMODULE "force using oxen-encoding submodule" OFF)
-if(NOT FORCE_OXENC_SUBMODULE)
-  pkg_check_modules(OXENC liboxenc>=1.0.2 IMPORTED_TARGET)
-endif()
-
-if(OXENC_FOUND)
-if(NOT TARGET PkgConfig::OXENC AND CMAKE_VERSION VERSION_LESS "3.21")
-add_library(_empty_oxenc INTERFACE)
-add_library(oxenc::oxenc ALIAS _empty_oxenc)
-else()
-add_library(oxenc::oxenc ALIAS PkgConfig::OXENC)
-endif()
-  message(STATUS "Found system liboxenc ${OXENC_VERSION}")
-else()
-  message(STATUS "using oxen-encoding submodule")
-  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/external/oxen-encoding)
-endif()
-
-
-option(FORCE_OXENMQ_SUBMODULE "force using oxenmq submodule" ON)
-if(NOT FORCE_OXENMQ_SUBMODULE)
-  pkg_check_modules(OXENMQ liboxenmq>=1.2.4 IMPORTED_TARGET)
-endif()
-if(OXENMQ_FOUND)
-  add_library(oxenmq INTERFACE)
-  link_dep_libs(oxenmq INTERFACE "${OXENMQ_LIBRARY_DIRS}" ${OXENMQ_LIBRARIES})
-  target_include_directories(oxenmq INTERFACE ${OXENMQ_INCLUDE_DIRS})
-  add_library(oxenmq::oxenmq ALIAS oxenmq)
-  message(STATUS "Found system liboxenmq ${OXENMQ_VERSION}")
-else()
-  message(STATUS "using oxenmq submodule")
-  add_subdirectory(${CMAKE_SOURCE_DIR}/external/oxen-mq)
-endif()
 
 
 if(NOT APPLE)
-  add_compile_options(-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Wno-deprecated-declarations -Werror=vla)
+add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Wno-deprecated-declarations -Werror=vla)
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wno-unknown-warning-option)
   endif()
-endif()
-
-if (NOT CMAKE_SYSTEM_NAME MATCHES "Linux" AND SHADOW)
-  message( FATAL_ERROR "shadow-framework is Linux only" )
 endif()
 
 if(XSAN)
@@ -232,18 +180,8 @@ if(XSAN)
 endif()
 
 if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
-  add_definitions(-DBELNET_DEBUG=1)
+  add_definitions(-DBELNET_DEBUG)
 endif()
-
-if(WITH_SHELLHOOKS)
-  add_definitions(-DENABLE_SHELLHOOKS)
-endif()
-
-if(TRACY_ROOT)
-  include_directories(${TRACY_ROOT})
-  add_definitions(-DTRACY_ENABLE)
-endif()
-
 
 include(cmake/coverage.cmake)
 
@@ -273,20 +211,10 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 
-if(USE_NETNS)
-  add_definitions(-DNETNS=1)
-else()
-  add_definitions(-DNETNS=0)
-endif()
-
 if(TESTNET)
-  add_definitions(-DTESTNET=1)
+  add_definitions(-DTESTNET)
   # 5 times slower than realtime
   # add_definitions(-DTESTNET_SPEED=5)
-endif()
-
-if(SHADOW)
-  include(cmake/shadow.cmake)
 endif()
 
 unset(GIT_VERSION)
@@ -343,12 +271,8 @@ if(ANDROID)
   set(ANDROID_PLATFORM_SRC android/ifaddrs.c)
 endif()
 
-if(TRACY_ROOT)
-  target_link_libraries(base_libs INTERFACE dl)
-endif()
-
 if(WITH_HIVE)
-  add_definitions(-DBELNET_HIVE=1)
+  add_definitions(-DBELNET_HIVE)
 endif()
 
 add_subdirectory(crypto)
@@ -359,13 +283,11 @@ if(WITH_HIVE)
   add_subdirectory(pybind)
 endif()
 
-if (NOT SHADOW)
-  if(WITH_TESTS OR WITH_HIVE)
-    add_subdirectory(test)
-  endif()
-  if(ANDROID)
-    add_subdirectory(jni)
-  endif()
+if(WITH_TESTS OR WITH_HIVE)
+  add_subdirectory(test)
+endif()
+if(ANDROID)
+  add_subdirectory(jni)
 endif()
 
 add_subdirectory(docs)

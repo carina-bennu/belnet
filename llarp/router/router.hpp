@@ -84,6 +84,9 @@ namespace llarp
       return m_PathBuildLimiter;
     }
 
+    const llarp::net::Platform&
+    Net() const override;
+
     const LMQ_ptr&
     lmq() const override
     {
@@ -101,6 +104,9 @@ namespace llarp
     {
       return _dht;
     }
+
+    std::optional<std::variant<nuint32_t, nuint128_t>>
+    OurPublicIP() const override;
 
     util::StatusObject
     ExtractStatus() const override;
@@ -197,6 +203,17 @@ namespace llarp
     bool
     LooksDecommissioned() const;
 
+    /// return true if we look like we are a deregistered master node
+    bool
+    LooksDeregistered() const;
+
+    /// return true if we look like we are allowed and able to test other routers
+    bool
+    ShouldTestOtherRouters() const;
+
+        int
+    OutboundUDPSocket() const override;
+
     std::optional<SockAddr> _ourAddress;
 
     EventLoop_ptr _loop;
@@ -216,7 +233,6 @@ namespace llarp
     bool
     Sign(Signature& sig, const llarp_buffer_t& buf) const override;
 
-    uint16_t m_OutboundPort = 0;
     /// how often do we resign our RC? milliseconds.
     // TODO: make configurable
     llarp_time_t rcRegenInterval = 1h;
@@ -352,7 +368,10 @@ namespace llarp
     bool
     HandleRecvLinkMessageBuffer(ILinkSession* from, const llarp_buffer_t& msg) override;
 
-    bool
+    void
+    InitInboundLinks();
+
+    void
     InitOutboundLinks();
 
     bool
@@ -530,15 +549,8 @@ namespace llarp
       return m_Config;
     }
 
-#if defined(ANDROID)
-    int m_OutboundUDPSocket = -1;
 
-    int
-    GetOutboundUDPSocket() const override
-    {
-      return m_OutboundUDPSocket;
-    }
-#endif
+    int m_OutboundUDPSocket = -1;
 
    private:
     std::atomic<bool> _stopping;

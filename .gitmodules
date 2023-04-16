@@ -10,15 +10,9 @@
 [submodule "test/Catch2"]
 	path = test/Catch2
 	url = https://github.com/catchorg/Catch2
-[submodule "external/date"]
-	path = external/date
-	url = https://github.com/HowardHinnant/date.git
 [submodule "external/pybind11"]
 	path = external/pybind11
 	url = https://github.com/pybind/pybind11
-[submodule "external/clang-format-hooks"]
-	path = external/clang-format-hooks
-	url = https://github.com/barisione/clang-format-hooks/
 [submodule "external/sqlite_orm"]
 	path = external/sqlite_orm
 	url = https://github.com/fnc12/sqlite_orm
@@ -38,3 +32,7 @@
 [submodule "external/oxen-encoding"]
 	path = external/oxen-encoding
 	url = https://github.com/oxen-io/oxen-encoding.git
+	ignore = dirty
+[submodule "external/oxen-logging"]
+	path = external/oxen-logging
+	url = https://github.com/oxen-io/oxen-logging.git

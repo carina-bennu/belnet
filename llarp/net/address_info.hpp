@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <oxenc/variant.h>
+
 /**
  * address_info.hpp
  *
@@ -25,7 +27,7 @@ namespace llarp
     llarp::PubKey pubkey;
     in6_addr ip = {};
     uint16_t port;
-    uint64_t version = LLARP_PROTO_VERSION;
+    uint64_t version = llarp::constants::proto_version;
 
     bool
     BDecode(llarp_buffer_t* buf)
@@ -47,18 +49,17 @@ namespace llarp
     void
     fromSockAddr(const SockAddr& address);
 
-    std::ostream&
-    print(std::ostream& stream, int level, int spaces) const;
+     /// get this as an explicit v4 or explicit v6
+    std::variant<nuint32_t, nuint128_t>
+    IP() const;
+
+    std::string
+    ToString() const;
+
   };
 
   void
   to_json(nlohmann::json& j, const AddressInfo& a);
-
-  inline std::ostream&
-  operator<<(std::ostream& out, const AddressInfo& a)
-  {
-    return a.print(out, -1, -1);
-  }
 
   bool
   operator==(const AddressInfo& lhs, const AddressInfo& rhs);
@@ -66,6 +67,8 @@ namespace llarp
   bool
   operator<(const AddressInfo& lhs, const AddressInfo& rhs);
 
+  template <>
+  constexpr inline bool IsToStringFormattable<AddressInfo> = true;
 }  // namespace llarp
 
 namespace std

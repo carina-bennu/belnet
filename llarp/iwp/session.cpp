@@ -24,7 +24,7 @@ namespace llarp
       }
       // randomize nounce
       CryptoManager::instance()->randbytes(pkt.data() + HMACSIZE, TUNNONCESIZE);
-      pkt[PacketOverhead] = LLARP_PROTO_VERSION;
+      pkt[PacketOverhead] = llarp::constants::proto_version;
       pkt[PacketOverhead + 1] = cmd;
       return pkt;
     }
@@ -175,8 +175,7 @@ namespace llarp
       if (m_State == State::Closed)
         return;
       auto close_msg = CreatePacket(Command::eCLOS, 0, 16, 16);
-      if (m_State == State::Ready)
-        m_Parent->UnmapAddr(m_RemoteAddr);
+      m_Parent->UnmapAddr(m_RemoteAddr);
       m_State = State::Closed;
       if (m_SentClosed.test_and_set())
         return;
@@ -346,7 +345,7 @@ namespace llarp
           {"replayFilter", m_ReplayFilter.size()},
           {"txMsgQueueSize", m_TXMsgs.size()},
           {"rxMsgQueueSize", m_RXMsgs.size()},
-          {"remoteAddr", m_RemoteAddr.toString()},
+          {"remoteAddr", m_RemoteAddr.ToString()},
           {"remoteRC", m_RemoteRC.ExtractStatus()},
           {"created", to_json(m_CreatedAt)},
           {"uptime", to_json(now - m_CreatedAt)}};
@@ -656,10 +655,13 @@ namespace llarp
           LogError("failed to decrypt session data from ", m_RemoteAddr);
           continue;
         }
-        if (pkt[PacketOverhead] != LLARP_PROTO_VERSION)
+        if (pkt[PacketOverhead] != llarp::constants::proto_version)
         {
           LogError(
-              "protocol version mismatch ", int(pkt[PacketOverhead]), " != ", LLARP_PROTO_VERSION);
+              "protocol version mismatch ",
+              int(pkt[PacketOverhead]),
+              " != ",
+              llarp::constants::proto_version);
           itr = msgs.erase(itr);
           continue;
         }

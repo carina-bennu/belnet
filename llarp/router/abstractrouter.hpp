@@ -45,6 +45,12 @@ namespace llarp
   struct I_RCLookupHandler;
   struct RoutePoker;
 
+
+   namespace net
+  {
+    class Platform;
+  }
+
   namespace exit
   {
     struct Context;
@@ -92,6 +98,9 @@ namespace llarp
 
     virtual bool
     HandleRecvLinkMessageBuffer(ILinkSession* from, const llarp_buffer_t& msg) = 0;
+
+    virtual const net::Platform&
+    Net() const = 0;
 
     virtual const LMQ_ptr&
     lmq() const = 0;
@@ -220,6 +229,10 @@ namespace llarp
     virtual const byte_t*
     pubkey() const = 0;
 
+    /// get what our real public ip is if we can know it
+    virtual std::optional<std::variant<nuint32_t, nuint128_t>>
+    OurPublicIP() const = 0;
+
     /// connect to N random routers
     virtual void
     ConnectToRandomRouters(int N) = 0;
@@ -342,10 +355,8 @@ namespace llarp
       HandleRouterEvent(std::move(event));
     }
 
-#if defined(ANDROID)
     virtual int
-    GetOutboundUDPSocket() const = 0;
-#endif
+    OutboundUDPSocket() const = 0;
 
    protected:
     /// Virtual function to handle RouterEvent. HiveRouter overrides this in

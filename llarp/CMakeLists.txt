@@ -7,18 +7,9 @@ add_library(belnet-util
   util/buffer.cpp
   util/fs.cpp
   util/json.cpp
-  util/logging/android_logger.cpp
   util/logging/buffer.cpp
-  util/logging/file_logger.cpp
-  util/logging/logger.cpp
-  util/logging/logger_internal.cpp
-  util/logging/loglevel.cpp
-  util/logging/ostream_logger.cpp
-  util/logging/syslog_logger.cpp
-  util/logging/win32_logger.cpp
   util/belnet_init.c
   util/mem.cpp
-  util/printer.cpp
   util/str.cpp
   util/thread/queue_manager.cpp
   util/thread/threading.cpp
@@ -33,13 +24,9 @@ target_link_libraries(belnet-util PUBLIC
   belnet-cryptography
   nlohmann_json::nlohmann_json
   filesystem
-  date::date
-  oxenmq::oxenmq
+  oxenc::oxenc
+  oxen::logging
 )
-
-if(ANDROID)
-  target_link_libraries(belnet-util PUBLIC log)
-endif()
 
 add_library(belnet-platform
   STATIC
@@ -59,15 +46,13 @@ add_library(belnet-platform
 )
 
 target_link_libraries(belnet-platform PUBLIC belnet-cryptography belnet-util Threads::Threads base_libs uvw)
-
+target_link_libraries(belnet-platform PRIVATE oxenmq::oxenmq)
 
 if (ANDROID)
   target_sources(belnet-platform PRIVATE android/ifaddrs.c)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  target_sources(belnet-platform PRIVATE linux/netns.cpp)
-
   if(NON_PC_TARGET)
     add_import_library(rt)
     target_link_libraries(belnet-platform PUBLIC rt)
@@ -139,7 +124,6 @@ add_library(libbelnet
   exit/session.cpp
   handlers/exit.cpp
   handlers/tun.cpp
-  hook/shell.cpp
   iwp/iwp.cpp
   iwp/linklayer.cpp
   iwp/message_buffer.cpp
@@ -215,7 +199,6 @@ add_library(libbelnet
   service/name.cpp
   service/outbound_context.cpp
   service/protocol.cpp
-  service/protocol_type.cpp
   service/router_lookup_job.cpp
   service/sendcontext.cpp
   service/session.cpp
@@ -230,10 +213,6 @@ if(TRACY_ROOT)
   target_sources(libbelnet PRIVATE ${TRACY_ROOT}/TracyClient.cpp)
 endif()
 
-if(TESTNET)
-  target_sources(libbelnet PRIVATE testnet.c)
-endif()
-
 if(WITH_HIVE)
   target_sources(libbelnet PRIVATE
     tooling/router_hive.cpp
@@ -242,7 +221,15 @@ if(WITH_HIVE)
   )
 endif()
 
-target_link_libraries(libbelnet PUBLIC cxxopts belnet-platform belnet-util belnet-cryptography sqlite_orm ngtcp2_static)
+target_link_libraries(libbelnet PUBLIC
+    cxxopts
+    oxenc::oxenc
+    belnet-platform
+    belnet-util
+    belnet-cryptography
+    sqlite_orm
+    ngtcp2_static
+    oxenmq::oxenmq)
 target_link_libraries(libbelnet PRIVATE libunbound)
 pkg_check_modules(CRYPT libcrypt IMPORTED_TARGET)
 if(CRYPT_FOUND AND NOT CMAKE_CROSSCOMPILING)
@@ -268,16 +255,11 @@ if(BUILD_LIBBELNET)
   else()
     install(TARGETS belnet-shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libbelnet)
   endif()
-  add_log_tag(belnet-shared)
 endif()
 
 if(APPLE)
   add_subdirectory(apple)
 endif()
-
-foreach(belnet_lib libbelnet belnet-platform belnet-util belnet-cryptography)
-  add_log_tag(${belnet_lib})
-endforeach()
 
 file(GLOB_RECURSE docs_SRC */*.hpp *.hpp)
 

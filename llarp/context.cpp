@@ -10,7 +10,7 @@
 #include "nodedb.hpp"
 #include "router/router.hpp"
 #include "service/context.hpp"
-#include "util/logging/logger.hpp"
+#include "util/logging.hpp"
 
 #include <cxxopts.hpp>
 #include <csignal>
@@ -212,13 +212,5 @@ namespace llarp
     llarp::LogDebug("free loop");
     loop.reset();
   }
-
-#if defined(ANDROID)
-  int
-  Context::GetUDPSocket()
-  {
-    return router->GetOutboundUDPSocket();
-  }
-#endif
 
 }  // namespace llarp
