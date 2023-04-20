@@ -34,17 +34,17 @@ namespace mocks
   class Network : public llarp::net::Platform, public llarp::uv::Loop
   {
     std::unordered_multimap<std::string, llarp::IPRange> _network_interfaces;
-    bool _snode;
+    bool _mnode;
 
     const Platform* const m_Default{Platform::Default_ptr()};
 
    public:
     Network(
-        std::unordered_multimap<std::string, llarp::IPRange> network_interfaces, bool snode = true)
+        std::unordered_multimap<std::string, llarp::IPRange> network_interfaces, bool mnode = true)
         : llarp::net::Platform{}
         , llarp::uv::Loop{1024}
         , _network_interfaces{std::move(network_interfaces)}
-        , _snode{snode}
+        , _mnode{mnode}
     {}
 
     void
@@ -60,7 +60,7 @@ namespace mocks
     llarp::RuntimeOptions
     Opts() const
     {
-      return llarp::RuntimeOptions{false, false, _snode};
+      return llarp::RuntimeOptions{false, false, _mnode};
     }
 
     std::shared_ptr<llarp::UDPHandle>
