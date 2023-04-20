@@ -934,7 +934,8 @@ namespace llarp
         return false;
       // if for some reason we stored an RC that isn't a valid router
       // purge this entry
-      if (not rc.IsPublicRouter())
+      /// clear out a fully expired RC
+      if (rc.IsExpired(now))
         return true;
       // clients have a notion of a whilelist
       // we short circuit logic here so we dont remove
