@@ -405,7 +405,7 @@ namespace llarp::net
       while (num < 255)
       {
         std::string ifname = fmt::format("beldextun{}", num);
-        if (GetInterfaceAddr(ifname, AF_INET))
+        if (GetInterfaceAddr(ifname, AF_INET) == std::nullopt)
           return ifname;
         num++;
       }
