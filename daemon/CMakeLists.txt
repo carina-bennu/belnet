@@ -76,7 +76,8 @@ endforeach()
 if(APPLE)
 
   set(CODESIGN_APP "" CACHE STRING "codesign the macos app using this key identity")
-  set(CODESIGN_APPEX "${CODESIGN_APP}" CACHE STRING "codesign the internal extension using this key identity; defaults to CODESIGN_APP if empty")
+  set(CODESIGN_EXT "${CODESIGN_APP}" CACHE STRING "codesign the internal extension using this key identity; defaults to CODESIGN_APP if empty")
+  option(CODESIGN "codesign the resulting app and extension" ON)
 
   set(mac_icon ${CMAKE_CURRENT_BINARY_DIR}/belnet.icns)
   add_custom_command(OUTPUT ${mac_icon}
@@ -106,8 +107,14 @@ if(APPLE)
     MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/contrib/macos/Info.plist.in"
     MACOSX_BUNDLE_ICON_FILE "${mac_icon}"
     MACOSX_BUNDLE_COPYRIGHT "© 2021, The Beldex Project")
-  if (CODESIGN_APP AND CODESIGN_APPEX)
-    message(STATUS "codesigning with ${CODESIGN_APP} (app) ${CODESIGN_APPEX} (appex)")
+    if(NOT CODESIGN)
+    message(STATUS "codesigning disabled")
+    add_custom_target(
+      sign
+      DEPENDS belnet belnet-extension
+      COMMAND "true")
+  elseif (CODESIGN_APP AND CODESIGN_EXT)
+    message(STATUS "codesigning with ${CODESIGN_APP} (app) ${CODESIGN_EXT} (appex)")
     set(SIGN_TARGET "${CMAKE_CURRENT_BINARY_DIR}/belnet.app")
     configure_file(
       "${PROJECT_SOURCE_DIR}/contrib/macos/sign.sh.in"
@@ -119,11 +126,7 @@ if(APPLE)
       COMMAND "${PROJECT_BINARY_DIR}/sign.sh"
       )
   else()
-    message(WARNING "Not codesigning: CODESIGN_APP (=${CODESIGN_APP}) and/or CODESIGN_APPEX (=${CODESIGN_APPEX}) are not set")
-    add_custom_target(
-      sign
-      DEPENDS belnet belnet-extension
-      COMMAND "true")
+    message(FATAL_ERROR "CODESIGN_APP (=${CODESIGN_APP}) and/or CODESIGN_EXT (=${CODESIGN_EXT}) are not set. To disable code signing use -DCODESIGN=OFF")
   endif()
 endif()
 
