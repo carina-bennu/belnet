@@ -3,7 +3,6 @@ if(APPLE)
   set(DEFAULT_WITH_BOOTSTRAP OFF)
 endif()
 option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
-
 set(exetargets belnet)
 
 if(APPLE)
@@ -75,6 +74,36 @@ foreach(exe ${exetargets})
     endif()
   endif()
 endforeach()
+
+set(default_with_gui OFF)
+if(APPLE)
+  set(default_with_gui ON)
+endif()
+
+option(WITH_GUI "build electron gui from source" ${default_with_gui})
+
+if (WITH_GUI)
+  find_program(YARN yarn REQUIRED)
+  message(STATUS "Found yarn: ${YARN}")
+  if(NOT GUI_GIT_REPO)
+    set(GUI_GIT_REPO "https://github.com/Beldex-Coin/belnet-gui")
+  endif()
+  if(NOT GUI_GIT_BRANCH)
+    set(GUI_GIT_BRANCH "master")
+  endif()
+  if(NOT YARN_TARGET)
+    set(YARN_TARGET pack:raw)
+    if(APPLE)
+      set(YARN_TARGET macos:raw)
+    endif()
+  endif()
+  message(STATUS "will build gui: ${GUI_GIT_REPO} (branch: ${GUI_GIT_BRANCH}) using ${YARN} ${YARN_TARGET}")
+  add_custom_target(belnet-gui
+    COMMAND rm -rf "${PROJECT_BINARY_DIR}/belnet-gui" && git clone "${GUI_GIT_REPO}" -b ${GUI_GIT_BRANCH} "${PROJECT_BINARY_DIR}/belnet-gui" && cd "${PROJECT_BINARY_DIR}/belnet-gui" && ${YARN} install --frozen-lockfile && ${YARN} ${YARN_TARGET})
+else()
+  message(STATUS "not building gui")
+  add_custom_target(belnet-gui COMMAND "true")
+endif()
 
 if(APPLE)
   option(MACOS_SYSTEM_EXTENSION
@@ -161,18 +190,11 @@ if(APPLE)
     set(post_build_pp COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CODESIGN_PROFILE}
         $<TARGET_BUNDLE_DIR:belnet>/Contents/embedded.provisionprofile)
   endif()
-  add_custom_command(TARGET belnet
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed
-        $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/Resources/bootstrap.signed
-    COMMAND mkdir -p $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
-    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
-    ${post_build_pp}
-  )
+  
 
   set_target_properties(belnet
     PROPERTIES
-          OUTPUT_NAME Belnet
+    OUTPUT_NAME Belnet
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_INFO_STRING "Belnet IP Packet Onion Router"
     MACOSX_BUNDLE_BUNDLE_NAME "Belnet"
@@ -186,14 +208,29 @@ if(APPLE)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   )
 
+  set(copy_gui)
+  if(BUILD_GUI)
+    set(copy_gui COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_BINARY_DIR}/belnet-gui/release/mac/belnet-gui.app $<TARGET_BUNDLE_DIR:belnet>)
+  endif()
+
+  add_custom_target(assemble
+    DEPENDS belnet belnet-extension belnet-gui
+    ${copy_gui}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed
+      $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/Resources/bootstrap.signed
+    COMMAND mkdir -p $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
+    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
+    ${post_build_pp})
+
     if(NOT CODESIGN)
     message(STATUS "codesigning disabled")
     add_custom_target(
       sign
-      DEPENDS belnet belnet-extension
+      DEPENDS assemble
       COMMAND "true")
+
     elseif(CODESIGN)
-    set(SIGN_TARGET "${PROJECT_BINARY_DIR}/belnet.app")
+    set(SIGN_TARGET "${PROJECT_BINARY_DIR}/Belnet.app")
     if(MACOS_SYSTEM_EXTENSION)
       set(BELNET_ENTITLEMENTS_TYPE sysext)
     else()
@@ -205,7 +242,7 @@ if(APPLE)
       @ONLY)
     add_custom_target(
       sign
-      DEPENDS "${PROJECT_BINARY_DIR}/sign.sh" belnet belnet-extension
+      DEPENDS "${PROJECT_BINARY_DIR}/sign.sh" assemble
       COMMAND "${PROJECT_BINARY_DIR}/sign.sh"
       )
       if(NOT (MACOS_NOTARIZE_USER AND MACOS_NOTARIZE_PASS AND MACOS_NOTARIZE_ASC))

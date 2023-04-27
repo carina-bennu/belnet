@@ -9,7 +9,7 @@
 		<string>Belnet</string>
 
 		<key>CFBundleExecutable</key>
-		<string>Belnet</string>
+		<string>belnet-gui</string>
 
 		<key>CFBundleIdentifier</key>
 		<string>org.belnet</string>

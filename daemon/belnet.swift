@@ -17,12 +17,12 @@ class BelnetMain: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         
-        if self.mode == START {
+        if mode == START {
             startNetworkExtension()
-        } else if self.mode == STOP {
+        } else if mode == STOP {
             tearDownVPNTunnel()
         } else {
-            self.result(msg: HELP_STRING)
+            result(msg: HELP_STRING)
         }
     }
 
@@ -33,7 +33,7 @@ class BelnetMain: NSObject, NSApplicationDelegate {
     func result(msg: String) {
         NSLog(msg)
         // TODO: does belnet continue after this?
-        self.bail()
+        bail()
     }
 
     func tearDownVPNTunnel() {
@@ -58,20 +58,18 @@ class BelnetMain: NSObject, NSApplicationDelegate {
     }
 
     func startNetworkExtension() {
-#if MACOS_SYSTEM_EXTENSION
-        NSLog("Loading Belnet network extension")
-        // Start by activating the system extension
-        let activationRequest = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: netextBundleId, queue: .main)
-        activationRequest.delegate = self
-        OSSystemExtensionManager.shared.submitRequest(activationRequest)
-#else
-        setupVPNTunnel()
-#endif
+        #if MACOS_SYSTEM_EXTENSION
+            NSLog("Loading Belnet network extension")
+            // Start by activating the system extension
+            let activationRequest = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: netextBundleId, queue: .main)
+            activationRequest.delegate = self
+            OSSystemExtensionManager.shared.submitRequest(activationRequest)
+        #else
+            setupVPNTunnel()
+        #endif
     }
 
     func setupVPNTunnel() {
-        
-
         NSLog("Starting up Belnet tunnel")
         NETunnelProviderManager.loadAllFromPreferences { [self] (savedManagers: [NETunnelProviderManager]?, error: Error?) in
             if let error = error {
@@ -146,33 +144,29 @@ class BelnetMain: NSObject, NSApplicationDelegate {
 
 #if MACOS_SYSTEM_EXTENSION
 
-extension BelnetMain: OSSystemExtensionRequestDelegate {
-
-    func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
-        guard result == .completed else {
-            NSLog("Unexpected result %d for system extension request", result.rawValue)
-            return
+    extension BelnetMain: OSSystemExtensionRequestDelegate {
+        func request(_: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+            guard result == .completed else {
+                NSLog("Unexpected result %d for system extension request", result.rawValue)
+                return
+            }
+            NSLog("Belnet system extension loaded")
+            setupVPNTunnel()
         }
-        NSLog("Belnet system extension loaded")
-        setupVPNTunnel()
-    }
 
-    func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        NSLog("System extension request failed: %@", error.localizedDescription)
+        func request(_: OSSystemExtensionRequest, didFailWithError error: Error) {
+            NSLog("System extension request failed: %@", error.localizedDescription)
+        }
+        
+        func request(_ request: OSSystemExtensionRequest,
+                     actionForReplacingExtension existing: OSSystemExtensionProperties,
+                     withExtension extension: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction
+        {
+            NSLog("Replacing extension %@ version %@ with version %@", request.identifier, existing.bundleShortVersion, `extension`.bundleShortVersion)
+            return .replace
+        }
     }
-
-    func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        NSLog("Extension %@ requires user approval", request.identifier)
-    }
-
-    func request(_ request: OSSystemExtensionRequest,
-                 actionForReplacingExtension existing: OSSystemExtensionProperties,
-                 withExtension extension: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
-        NSLog("Replacing extension %@ version %@ with version %@", request.identifier, existing.bundleShortVersion, `extension`.bundleShortVersion)
-        return .replace
-    }
-}
-
+    
 #endif
 
 let args = CommandLine.arguments
