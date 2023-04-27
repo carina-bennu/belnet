@@ -25,26 +25,37 @@ target_link_libraries(belnet-extension PRIVATE
   ${COREFOUNDATION}
   ${NETEXT})
 
-# Not sure what -fapplication-extension does, but XCode puts it in so...
 # -fobjc-arc enables automatic reference counting for objective-C code
 # -e _NSExtensionMain because the appex has that instead of a `main` function entry point, of course.
-target_compile_options(belnet-extension PRIVATE -fapplication-extension -fobjc-arc)
-target_link_options(belnet-extension PRIVATE -fapplication-extension -e _NSExtensionMain)
+target_compile_options(belnet-extension PRIVATE -fobjc-arc)
+if(MACOS_SYSTEM_EXTENSION)
+  target_compile_definitions(belnet-extension PRIVATE MACOS_SYSTEM_EXTENSION)
+  target_compile_definitions(belnet-util PUBLIC MACOS_SYSTEM_EXTENSION)
+else()
+  target_link_options(belnet-extension PRIVATE -e _NSExtensionMain)
+endif()
 
-target_link_libraries(belnet-extension PUBLIC
-  libbelnet
-  ${COREFOUNDATION}
-  ${NETEXT})
+if(MACOS_SYSTEM_EXTENSION)
+    set(bundle_ext systemextension)
+    set(product_type com.apple.product-type.system-extension)
+else()
+    set(bundle_ext appex)
+    set(product_type com.apple.product-type.app-extension)
+endif()
 
 set_target_properties(belnet-extension PROPERTIES
   BUNDLE TRUE
-  BUNDLE_EXTENSION appex
-  MACOSX_BUNDLE_INFO_PLIST ${PROJECT_SOURCE_DIR}/contrib/macos/BelnetExtension.Info.plist.in
-  XCODE_PRODUCT_TYPE com.apple.product-type.app-extension
+  BUNDLE_EXTENSION ${bundle_ext}
+  OUTPUT_NAME org.belnet.network-extension
+  MACOSX_BUNDLE_INFO_PLIST ${PROJECT_SOURCE_DIR}/contrib/macos/belnet-extension.Info.plist.in
+  XCODE_PRODUCT_TYPE ${product_type}
   )
 
-add_custom_command(TARGET belnet-extension
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/contrib/macos/belnet-extension.provisionprofile
-  $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/embedded.provisionprofile
+if(CODESIGN AND CODESIGN_EXT_PROFILE)
+  add_custom_command(TARGET belnet-extension
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${CODESIGN_EXT_PROFILE}
+      $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/embedded.provisionprofile
   )
+endif()

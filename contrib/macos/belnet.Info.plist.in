@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>CFBundleDevelopmentRegion</key>
+		<string>en</string>
+
+		<key>CFBundleDisplayName</key>
+		<string>Belnet</string>
+
+		<key>CFBundleExecutable</key>
+		<string>Belnet</string>
+
+		<key>CFBundleIdentifier</key>
+		<string>org.belnet</string>
+
+		<key>CFBundleInfoDictionaryVersion</key>
+		<string>6.0</string>
+
+		<key>CFBundleName</key>
+		<string>Belnet</string>
+
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+
+		<key>CFBundleShortVersionString</key>
+		<string>@belnet_VERSION@</string>
+
+		<key>CFBundleVersion</key>
+		<string>@belnet_VERSION@.@BELNET_APPLE_BUILD@</string>
+
+		<key>LSMinimumSystemVersion</key>
+		<string>10.15</string>
+
+        <key>NSHumanReadableCopyright</key>
+        <string>Copyright © 2022 The Beldex Project, licensed under GPLv3-or-later</string>
+
+	</dict>
+</plist>

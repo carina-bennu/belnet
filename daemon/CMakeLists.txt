@@ -4,19 +4,24 @@ if(APPLE)
 endif()
 option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
 
-add_executable(belnet-vpn belnet-vpn.cpp)
+set(exetargets belnet)
+
 if(APPLE)
   add_executable(belnet belnet.swift)
-  enable_lto(belnet)
 else()
   add_executable(belnet belnet.cpp)
-  enable_lto(belnet belnet-vpn)
-
-  if(WITH_BOOTSTRAP)
-    add_executable(belnet-bootstrap belnet-bootstrap.cpp)
-    enable_lto(belnet-bootstrap)
-  endif()
 endif()
+
+add_executable(belnet-vpn belnet-vpn.cpp)
+enable_lto(belnet belnet-vpn)
+list(APPEND exetargets belnet-vpn)
+
+if(WITH_BOOTSTRAP)
+  add_executable(belnet-bootstrap belnet-bootstrap.cpp)
+  list(APPEND exetargets belnet-bootstrap)
+  enable_lto(belnet-bootstrap)
+endif()
+
 
 
 if(TRACY_ROOT)
@@ -48,10 +53,6 @@ if(WITH_BOOTSTRAP)
   endif()
 endif()
 
-set(exetargets belnet belnet-vpn)
-if(WITH_BOOTSTRAP)
-  list(APPEND exetargets belnet-bootstrap)
-endif()
 
 foreach(exe ${exetargets})
   if(WIN32 AND NOT MSVC_VERSION)
@@ -63,10 +64,12 @@ foreach(exe ${exetargets})
   endif()
   target_link_libraries(${exe} PUBLIC libbelnet)
   target_include_directories(${exe} PUBLIC "${PROJECT_SOURCE_DIR}")
-  target_compile_definitions(${exe} PRIVATE -DVERSIONTAG=${GIT_VERSION_REAL})
   if(should_install)
     if(APPLE)
-      install(TARGETS ${exe} BUNDLE DESTINATION "${PROJECT_BINARY_DIR}" COMPONENT belnet)
+      install(TARGETS ${exe}
+        BUNDLE DESTINATION "${PROJECT_BINARY_DIR}"
+        RUNTIME DESTINATION "."
+        COMPONENT belnet)
     else()
       install(TARGETS ${exe} RUNTIME DESTINATION bin COMPONENT belnet)
     endif()
@@ -74,10 +77,78 @@ foreach(exe ${exetargets})
 endforeach()
 
 if(APPLE)
-
-  set(CODESIGN_APP "" CACHE STRING "codesign the macos app using this key identity")
-  set(CODESIGN_EXT "${CODESIGN_APP}" CACHE STRING "codesign the internal extension using this key identity; defaults to CODESIGN_APP if empty")
+  option(MACOS_SYSTEM_EXTENSION
+    "Build the network extension as a system extension rather than a plugin.  This must be ON for non-app store release builds, and must be OFF for dev builds and Mac App Store distribution builds"
+    OFF)
   option(CODESIGN "codesign the resulting app and extension" ON)
+  set(CODESIGN_ID "" CACHE STRING "codesign the macos app using this key identity; if empty we'll try to guess")
+  set(default_profile_type "dev")
+  if(MACOS_SYSTEM_EXTENSION)
+    set(default_profile_type "release")
+  endif()
+  set(CODESIGN_PROFILE "${PROJECT_SOURCE_DIR}/contrib/macos/belnet.${default_profile_type}.provisionprofile" CACHE FILEPATH
+    "Path to a .provisionprofile to use for the main app")
+  set(CODESIGN_EXT_PROFILE "${PROJECT_SOURCE_DIR}/contrib/macos/belnet-extension.${default_profile_type}.provisionprofile" CACHE FILEPATH
+    "Path to a .provisionprofile to use for the extension")
+
+  if(CODESIGN AND NOT CODESIGN_ID)
+    if(MACOS_SYSTEM_EXTENSION)
+      set(codesign_cert_pattern "Developer ID Application")
+    else()
+      set(codesign_cert_pattern "Apple Development")
+    endif()
+    execute_process(
+      COMMAND security find-identity -v -p codesigning
+      COMMAND sed -n "s/^ *[0-9][0-9]*)  *\\([A-F0-9]\\{40\\}\\)  *\"\\(${codesign_cert_pattern}.*\\)\"\$/\\1 \\2/p"
+      RESULT_VARIABLE find_id_exit_code
+      OUTPUT_VARIABLE find_id_output)
+    if(NOT find_id_exit_code EQUAL 0)
+      message(FATAL_ERROR "Finding signing identities with security find-identity failed; try specifying an id using -DCODESIGN_ID=...")
+    endif()
+
+    string(REGEX MATCHALL "(^|\n)[0-9A-F]+" find_id_sign_id "${find_id_output}")
+    if(NOT find_id_sign_id)
+      message(FATAL_ERROR "Did not find any \"${codesign_cert_pattern}\" identity; try specifying an id using -DCODESIGN_ID=...")
+    endif()
+    if (find_id_sign_id MATCHES ";")
+      message(FATAL_ERROR "Found multiple \"${codesign_cert_pattern}\" identities:\n${find_id_output}\nSpecify an identify using -DCODESIGN_ID=...")
+    endif()
+    set(CODESIGN_ID "${find_id_sign_id}" CACHE STRING "" FORCE)
+  endif()
+
+  if(CODESIGN)
+    message(STATUS "Codesigning using ${CODESIGN_ID}")
+  else()
+    message(WARNING "Codesigning disabled; the resulting build will not run on most macOS systems")
+  endif()
+
+  if(MACOS_SYSTEM_EXTENSION)
+    set(belnet_ext_dir Contents/Library/SystemExtensions)
+    target_compile_definitions(belnet PRIVATE MACOS_SYSTEM_EXTENSION)
+    if (NOT MACOS_NOTARIZE_USER AND NOT MACOS_NOTARIZE_PASS AND NOT MACOS_NOTARIZE_ASC AND EXISTS "$ENV{HOME}/.notarization.cmake")
+      message(STATUS "Loading notarization info from ~/.notarization.cmake")
+      include("$ENV{HOME}/.notarization.cmake")
+    endif()
+    if (MACOS_NOTARIZE_USER AND MACOS_NOTARIZE_PASS AND MACOS_NOTARIZE_ASC)
+      message(STATUS "Enabling notarization with account ${MACOS_NOTARIZE_ASC}/${MACOS_NOTARIZE_USER}")
+    else()
+      message(WARNING "You have not set one or more of MACOS_NOTARIZE_USER, MACOS_NOTARIZE_PASS, MACOS_NOTARIZE_ASC: notarization will fail; see contrib/macos/README.txt")
+    endif()
+  else()
+    set(belnet_ext_dir Contents/PlugIns)
+  endif()
+
+  foreach(var CODESIGN_PROFILE CODESIGN_EXT_PROFILE)
+    if(NOT ${var})
+      message(WARNING "Missing a ${var} provisioning profile, and not building a system extension: Apple will most likely log an uninformative error message to the system log and then kill harmless kittens if you try to run the result")
+    endif()
+    if(NOT EXISTS "${${var}}")
+      message(FATAL_ERROR "Provisioning profile ${${var}} does not exist; fix your -D${var} path")
+    endif()
+  endforeach()
+  message(STATUS "Using ${CODESIGN_PROFILE} provisioning profile")
+  message(STATUS "Using ${CODESIGN_EXT_PROFILE} extension provisioning profile")
+
 
   set(mac_icon ${CMAKE_CURRENT_BINARY_DIR}/belnet.icns)
   add_custom_command(OUTPUT ${mac_icon}
@@ -85,37 +156,49 @@ if(APPLE)
     DEPENDS ${PROJECT_SOURCE_DIR}/contrib/belnet.svg ${PROJECT_SOURCE_DIR}/contrib/macos/mk-icns.sh)
   add_custom_target(icons DEPENDS ${mac_icon})
   add_dependencies(belnet icons belnet-extension)
+  set(post_build_pp)
+  if(CODESIGN AND CODESIGN_PROFILE)
+    set(post_build_pp COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CODESIGN_PROFILE}
+        $<TARGET_BUNDLE_DIR:belnet>/Contents/embedded.provisionprofile)
+  endif()
   add_custom_command(TARGET belnet
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed
         $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/Resources/bootstrap.signed
-    COMMAND mkdir -p $<TARGET_BUNDLE_DIR:belnet>/Contents/PlugIns
-    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> $<TARGET_BUNDLE_DIR:belnet>/Contents/PlugIns/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/contrib/macos/belnet.provisionprofile
-        $<TARGET_BUNDLE_DIR:belnet>/Contents/embedded.provisionprofile
-    )
+    COMMAND mkdir -p $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
+    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> $<TARGET_BUNDLE_DIR:belnet>/${belnet_ext_dir}
+    ${post_build_pp}
+  )
 
   set_target_properties(belnet
     PROPERTIES
+          OUTPUT_NAME Belnet
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_INFO_STRING "Belnet IP Packet Onion Router"
     MACOSX_BUNDLE_BUNDLE_NAME "Belnet"
     MACOSX_BUNDLE_BUNDLE_VERSION "${belnet_VERSION}"
     MACOSX_BUNDLE_LONG_VERSION_STRING "${belnet_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${belnet_VERSION_MAJOR}.${belnet_VERSION_MINOR}"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "com.beldex-project.belnet"
-    MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/contrib/macos/Info.plist.in"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.belnet"
+    MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/contrib/macos/belnet.Info.plist.in"
     MACOSX_BUNDLE_ICON_FILE "${mac_icon}"
-    MACOSX_BUNDLE_COPYRIGHT "© 2021, The Beldex Project")
+    MACOSX_BUNDLE_COPYRIGHT "© 2023, The Beldex Project"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  )
+
     if(NOT CODESIGN)
     message(STATUS "codesigning disabled")
     add_custom_target(
       sign
       DEPENDS belnet belnet-extension
       COMMAND "true")
-  elseif (CODESIGN_APP AND CODESIGN_EXT)
-    message(STATUS "codesigning with ${CODESIGN_APP} (app) ${CODESIGN_EXT} (appex)")
-    set(SIGN_TARGET "${CMAKE_CURRENT_BINARY_DIR}/belnet.app")
+    elseif(CODESIGN)
+    set(SIGN_TARGET "${PROJECT_BINARY_DIR}/belnet.app")
+    if(MACOS_SYSTEM_EXTENSION)
+      set(BELNET_ENTITLEMENTS_TYPE sysext)
+    else()
+      set(BELNET_ENTITLEMENTS_TYPE plugin)
+    endif()
     configure_file(
       "${PROJECT_SOURCE_DIR}/contrib/macos/sign.sh.in"
       "${PROJECT_BINARY_DIR}/sign.sh"
@@ -125,6 +208,24 @@ if(APPLE)
       DEPENDS "${PROJECT_BINARY_DIR}/sign.sh" belnet belnet-extension
       COMMAND "${PROJECT_BINARY_DIR}/sign.sh"
       )
+      if(NOT (MACOS_NOTARIZE_USER AND MACOS_NOTARIZE_PASS AND MACOS_NOTARIZE_ASC))
+      message(WARNING "You have not set one or more of MACOS_NOTARIZE_USER, MACOS_NOTARIZE_PASS, MACOS_NOTARIZE_ASC: notarization disabled")
+    endif()
+    if (MACOS_SYSTEM_EXTENSION)
+      set(notarize_py_is_sysext True)
+    else()
+      set(notarize_py_is_sysext False)
+    endif()
+    configure_file(
+      "${PROJECT_SOURCE_DIR}/contrib/macos/notarize.py.in"
+      "${PROJECT_BINARY_DIR}/notarize.py"
+      @ONLY)
+    add_custom_target(
+      notarize
+      DEPENDS "${PROJECT_BINARY_DIR}/notarize.py" sign
+      COMMAND "${PROJECT_BINARY_DIR}/notarize.py"
+      )
+      
   else()
     message(FATAL_ERROR "CODESIGN_APP (=${CODESIGN_APP}) and/or CODESIGN_EXT (=${CODESIGN_EXT}) are not set. To disable code signing use -DCODESIGN=OFF")
   endif()
