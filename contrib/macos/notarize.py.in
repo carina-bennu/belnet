@@ -24,11 +24,11 @@ if not all(("@MACOS_NOTARIZE_USER@", "@MACOS_NOTARIZE_PASS@", "@MACOS_NOTARIZE_A
 
 os.chdir("@PROJECT_BINARY_DIR@")
 app = "Belnet.app"
-zipfile = "Belnet.app.notarize.zip"
-print(f"Creating belnet.app.notarize.zip from belnet.app")
+zipfile = f"{app}.notarize.zip"
+print(f"Creating {zipfile} from {app}")
 if os.path.exists(zipfile):
     os.remove(zipfile)
-subprocess.run(['zip', '-r', zipfile, app])
+subprocess.run(['ditto', '-v', '-c', '-k', '--sequesterRsrc', '--keepParent', app, zipfile])
 
 
 

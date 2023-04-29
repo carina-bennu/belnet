@@ -18,20 +18,34 @@ if (BUILD_GUI)
 
   find_program(YARN NAMES yarn yarnpkg REQUIRED)
   message(STATUS "Building belnet-gui with yarn ${YARN}, target ${GUI_YARN_TARGET}")
+  set(wine_env)
+  if(WIN32)
+    set(wine_env WINEDEBUG=-all "WINEPREFIX=${PROJECT_BINARY_DIR}/wineprefix")
+  endif()
+
   add_custom_target(belnet-gui
     COMMAND ${YARN} install --frozen-lockfile &&
-      WINEDEBUG=-all "WINEPREFIX=${PROJECT_BINARY_DIR}/wineprefix" ${YARN} ${GUI_YARN_EXTRA_OPTS} ${GUI_YARN_TARGET}
+      ${wine_env} ${YARN} ${GUI_YARN_EXTRA_OPTS} ${GUI_YARN_TARGET}
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/gui")
 
   if(APPLE)
-    add_custom_target(copy_gui ALL
-      DEPENDS belnet belnet-extension belnet-gui
-      # FIXME: we really shouldn't be building inside the source directory but this is npm...
-      COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${PROJECT_SOURCE_DIR}/belnet-gui/release/mac/belnet-gui.app
-        $<TARGET_BUNDLE_DIR:belnet>
+  add_custom_target(assemble_gui ALL
+  DEPENDS assemble belnet-gui
+  COMMAND mkdir "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers"
+  COMMAND cp -a "${PROJECT_SOURCE_DIR}/gui/release/mac/Belnet-GUI.app" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/"
+  COMMAND mkdir -p "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/en.lproj"
+  COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/en.lproj/"
+  COMMAND cp "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/icon.icns" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Resources/icon.icns"
+  COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Resources/en.lproj/"
+  COMMAND /usr/libexec/PlistBuddy
+    -c "Delete :CFBundleDisplayName"
+    -c "Add :LSHasLocalizedDisplayName bool true"
+    -c "Add :CFBundleDevelopmentRegion string en"
+    -c "Set :CFBundleShortVersionString ${belnet_VERSION}"
+    -c "Set :CFBundleVersion ${belnet_VERSION}.${BELNET_APPLE_BUILD}"
+    "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Info.plist"
     )
-    add_dependencies(assemble copy_gui)
+    
   elseif(WIN32)
     file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/gui")
     add_custom_target(copy_gui ALL

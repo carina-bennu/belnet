@@ -5,11 +5,8 @@
 		<key>CFBundleDevelopmentRegion</key>
 		<string>en</string>
 
-		<key>CFBundleDisplayName</key>
-		<string>Belnet</string>
-
 		<key>CFBundleExecutable</key>
-		<string>belnet-gui</string>
+		<string>Belnet</string>
 
 		<key>CFBundleIdentifier</key>
 		<string>org.belnet</string>
@@ -19,6 +16,9 @@
 
 		<key>CFBundleName</key>
 		<string>Belnet</string>
+
+		<key>CFBundleIconFile</key>
+		<string>icon.icns</string>
 
 		<key>CFBundlePackageType</key>
 		<string>APPL</string>
@@ -33,7 +33,13 @@
 		<string>10.15</string>
 
         <key>NSHumanReadableCopyright</key>
-        <string>Copyright © 2022 The Beldex Project, licensed under GPLv3-or-later</string>
+		<string>Copyright © 2022 The Beldex Project, licensed under GPLv3-or-later</string>
+
+		<key>LSUIElement</key>
+		<true/>
+
+		<key>LSHasLocalizedDisplayName</key>
+		<true/>
 
 	</dict>
 </plist>

@@ -31,7 +31,7 @@ project(belnet
 if(APPLE)
     # Apple build number: must be incremented to submit a new build for the same belnet version,
     # should be reset to 0 when the belnet version increments.
-    set(BELNET_APPLE_BUILD 0)
+    set(BELNET_APPLE_BUILD 1)
 endif()
 
 set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
@@ -99,6 +99,7 @@ endif()
 
 include(cmake/solaris.cmake)
 include(cmake/win32.cmake)
+include(cmake/macos.cmake)
 
 # No in-source building
 include(MacroEnsureOutOfSourceBuild)
@@ -294,6 +295,10 @@ endif()
 add_subdirectory(docs)
 
 include(cmake/gui.cmake)
+
+if(APPLE)
+  macos_target_setup()
+endif()
 
 # uninstall target
 if(NOT TARGET uninstall)
