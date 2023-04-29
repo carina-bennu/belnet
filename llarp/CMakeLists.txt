@@ -205,6 +205,11 @@ add_library(libbelnet
   service/tag.cpp
 )
 
+if(WITH_PEERSTATS_BACKEND)
+  target_compile_definitions(libbelnet PRIVATE -DBELNET_PEERSTATS_BACKEND)
+  target_link_libraries(libbelnet PUBLIC sqlite_orm)
+endif()
+
 set_target_properties(libbelnet PROPERTIES OUTPUT_NAME belnet)
 
 enable_lto(belnet-util belnet-platform libbelnet)
@@ -227,7 +232,6 @@ target_link_libraries(libbelnet PUBLIC
     belnet-platform
     belnet-util
     belnet-cryptography
-    sqlite_orm
     ngtcp2_static
     oxenmq::oxenmq)
 target_link_libraries(libbelnet PRIVATE libunbound)
