@@ -31,19 +31,19 @@ if (BUILD_GUI)
   if(APPLE)
   add_custom_target(assemble_gui ALL
   DEPENDS assemble belnet-gui
-  COMMAND mkdir "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers"
-  COMMAND cp -a "${PROJECT_SOURCE_DIR}/gui/release/mac/Belnet-GUI.app" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/"
-  COMMAND mkdir -p "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/en.lproj"
-  COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/en.lproj/"
-  COMMAND cp "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/icon.icns" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Resources/icon.icns"
-  COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Resources/en.lproj/"
+  COMMAND mkdir "${belnet_app}/Contents/Helpers"
+      COMMAND cp -a "${PROJECT_SOURCE_DIR}/gui/release/mac/Belnet-GUI.app" "${belnet_app}/Contents/Helpers/"
+      COMMAND mkdir -p "${belnet_app}/Contents/Resources/en.lproj"
+      COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${belnet_app}/Contents/Resources/en.lproj/"
+      COMMAND cp "${belnet_app}/Contents/Resources/icon.icns" "${belnet_app}/Contents/Helpers/Belnet-GUI.app/Contents/Resources/icon.icns"
+      COMMAND cp "${PROJECT_SOURCE_DIR}/contrib/macos/InfoPlist.strings" "${belnet_app}/Contents/Helpers/Belnet-GUI.app/Contents/Resources/en.lproj/"
   COMMAND /usr/libexec/PlistBuddy
     -c "Delete :CFBundleDisplayName"
     -c "Add :LSHasLocalizedDisplayName bool true"
     -c "Add :CFBundleDevelopmentRegion string en"
     -c "Set :CFBundleShortVersionString ${belnet_VERSION}"
     -c "Set :CFBundleVersion ${belnet_VERSION}.${BELNET_APPLE_BUILD}"
-    "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Helpers/Belnet-GUI.app/Contents/Info.plist"
+    "${belnet_app}/Contents/Helpers/Belnet-GUI.app/Contents/Info.plist"
     )
     
   elseif(WIN32)

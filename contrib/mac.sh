@@ -7,8 +7,8 @@
 # provisioning profiles.  See macos/README.txt.
 #
 
-set -e
-set +x
+set -x
+
 if ! [ -f LICENSE.txt ] || ! [ -d llarp ]; then
     echo "You need to run this as ./contrib/mac.sh from the top-level belnet project directory"
 fi
@@ -24,10 +24,15 @@ cmake \
       -DNATIVE_BUILD=OFF \
       -DWITH_LTO=ON \
       -DCMAKE_BUILD_TYPE=Release \
+      -DMACOS_SYSTEM_EXTENSION=ON \
+      -DCODESIGN=ON \
+      -DBUILD_PACKAGE=ON \
       "$@" \
       ..
-ninja -j1
+ninja -j1 package
+
+cd ..
 
 echo -e "Build complete, your app is here:\n"
-ls -lad $(pwd)/Belnet.app
+ls -lad $(pwd)/build-mac/Belnet\ Installer*
 echo ""

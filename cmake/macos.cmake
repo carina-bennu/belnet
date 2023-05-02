@@ -67,6 +67,9 @@ if(NOT EXISTS "${CODESIGN_PROFILE}")
 endif()
 message(STATUS "Using ${CODESIGN_PROFILE} provisioning profile")
 
+set(belnet_installer "${PROJECT_BINARY_DIR}/Belnet Installer")
+set(belnet_app "${belnet_installer}/Belnet.app")
+
 
 if(MACOS_SYSTEM_EXTENSION)
   set(belnet_ext_dir Contents/Library/SystemExtensions)
@@ -113,6 +116,34 @@ else()
 endif()
 
 
+set(mac_icon "${PROJECT_BINARY_DIR}/belnet.icns")
+add_custom_command(OUTPUT "${mac_icon}"
+  COMMAND ${PROJECT_SOURCE_DIR}/contrib/macos/mk-icns.sh ${PROJECT_SOURCE_DIR}/contrib/belnet-mac.svg "${mac_icon}"
+  DEPENDS ${PROJECT_SOURCE_DIR}/contrib/belnet.svg ${PROJECT_SOURCE_DIR}/contrib/macos/mk-icns.sh)
+add_custom_target(icon DEPENDS "${mac_icon}")
+
+if(BUILD_PACKAGE)
+  add_custom_command(OUTPUT "${belnet_installer}.dmg"
+    DEPENDS notarize
+    COMMAND create-dmg
+      --volname "Belnet Installer"
+      --volicon belnet.icns
+      #--background ... FIXME
+      --text-size 16
+      --icon-size 128
+      --window-size 500 300
+      --icon Belnet.app 100 100
+      --hide-extension Belnet.app
+      --app-drop-link 350 100
+      --eula "${PROJECT_SOURCE_DIR}/LICENSE"
+      --no-internet-enable
+      "${belnet_installer}.dmg"
+      "${belnet_installer}"
+  )
+  add_custom_target(package DEPENDS "${belnet_installer}.dmg")
+endif()
+
+
 # Called later to set things up, after the main belnet targets are set up
 function(macos_target_setup)
 
@@ -140,11 +171,6 @@ function(macos_target_setup)
       $<TARGET_BUNDLE_DIR:belnet-extension>/Contents/Resources/bootstrap.signed
   )
 
-  set(mac_icon ${PROJECT_BINARY_DIR}/belnet.icns)
-  add_custom_command(OUTPUT ${mac_icon}
-    COMMAND ${PROJECT_SOURCE_DIR}/contrib/macos/mk-icns.sh ${PROJECT_SOURCE_DIR}/contrib/belnet-mac.svg ${mac_icon}
-    DEPENDS ${PROJECT_SOURCE_DIR}/contrib/belnet.svg ${PROJECT_SOURCE_DIR}/contrib/macos/mk-icns.sh)
-  add_custom_target(icon DEPENDS ${mac_icon})
 
 
   add_dependencies(belnet belnet-extension icon)
@@ -162,15 +188,18 @@ function(macos_target_setup)
 
   add_custom_target(assemble ALL
     DEPENDS belnet belnet-extension icon copy_prov_prof copy_bootstrap
-    COMMAND rm -rf "${PROJECT_BINARY_DIR}/Belnet.app"
-    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet> "${PROJECT_BINARY_DIR}/Belnet.app"
-    COMMAND mkdir -p "${PROJECT_BINARY_DIR}/Belnet.app/${belnet_ext_dir}"
-    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> "${PROJECT_BINARY_DIR}/Belnet.app/${belnet_ext_dir}/"
-    COMMAND mkdir -p "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources"
-    COMMAND cp -a "${mac_icon}" "${PROJECT_BINARY_DIR}/Belnet.app/Contents/Resources/icon.icns"
+    COMMAND rm -rf "${belnet_app}"
+    COMMAND mkdir -p "${belnet_installer}"
+    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet> "${belnet_app}"
+    COMMAND mkdir -p "${belnet_app}/${belnet_ext_dir}"
+    COMMAND cp -a $<TARGET_BUNDLE_DIR:belnet-extension> "${belnet_app}/${belnet_ext_dir}/"
+    COMMAND mkdir -p "${belnet_app}/Contents/Resources"
+    COMMAND cp -a "${mac_icon}" "${belnet_app}/Contents/Resources/icon.icns"
   )
 
-  if(CODESIGN)
+  if(CODESIGN AND BUILD_GUI)
+    add_dependencies(sign assemble_gui)
+  elseif(CODESIGN)
     add_dependencies(sign assemble)
   endif()
 endfunction()
