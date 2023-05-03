@@ -7,6 +7,7 @@ set(exetargets belnet)
 
 if(APPLE)
   add_executable(belnet belnet.swift)
+  target_compile_options(belnet BEFORE PRIVATE -target x86_64-apple-macos${CMAKE_OSX_DEPLOYMENT_TARGET})
 else()
   add_executable(belnet belnet.cpp)
 endif()

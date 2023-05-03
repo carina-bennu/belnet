@@ -88,7 +88,9 @@ class BelnetMain: NSObject, NSApplicationDelegate {
             providerProtocol.serverAddress = "beldex.bdx" // Needs to be set to some non-null dummy value
             providerProtocol.username = "anonymous"
             providerProtocol.providerBundleIdentifier = self.netextBundleId
-            providerProtocol.enforceRoutes = true
+            if #available(macOS 11, *) {
+                providerProtocol.enforceRoutes = true
+            }
             // macos seems to have trouble when this is true, and reports are that this breaks and
             // doesn't do what it says on the tin in the first place.  Needs more testing.
             providerProtocol.includeAllNetworks = false
