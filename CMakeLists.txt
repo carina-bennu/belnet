@@ -253,7 +253,6 @@ if(WITH_SYSTEMD AND (NOT ANDROID))
 endif()
 
 add_subdirectory(external)
-include_directories(SYSTEM external/sqlite_orm/include)
 
 if(USE_JEMALLOC AND NOT STATIC_LINK)
   pkg_check_modules(JEMALLOC jemalloc IMPORTED_TARGET)
