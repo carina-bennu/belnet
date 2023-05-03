@@ -70,7 +70,7 @@ endforeach()
 message(STATUS "Using ${CODESIGN_PROFILE} app provisioning profile")
 message(STATUS "Using ${CODESIGN_EXT_PROFILE} extension provisioning profile")
 
-set(belnet_installer "${PROJECT_BINARY_DIR}/Belnet Installer")
+set(belnet_installer "${PROJECT_BINARY_DIR}/Belnet ${PROJECT_VERSION}")
 set(belnet_app "${belnet_installer}/Belnet.app")
 
 
@@ -126,10 +126,11 @@ add_custom_command(OUTPUT "${mac_icon}"
 add_custom_target(icon DEPENDS "${mac_icon}")
 
 if(BUILD_PACKAGE)
+  add_executable(seticon "${PROJECT_SOURCE_DIR}/contrib/macos/seticon.swift")
   add_custom_command(OUTPUT "${belnet_installer}.dmg"
-    DEPENDS notarize
+    DEPENDS notarize seticon
     COMMAND create-dmg
-      --volname "Belnet Installer"
+      --volname "Belnet ${PROJECT_VERSION}"
       --volicon belnet.icns
       #--background ... FIXME
       --text-size 16
@@ -142,6 +143,7 @@ if(BUILD_PACKAGE)
       --no-internet-enable
       "${belnet_installer}.dmg"
       "${belnet_installer}"
+      COMMAND ./seticon belnet.icns "${belnet_installer}.dmg"
   )
   add_custom_target(package DEPENDS "${belnet_installer}.dmg")
 endif()

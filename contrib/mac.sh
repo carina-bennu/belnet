@@ -34,5 +34,5 @@ ninja -j1 package
 cd ..
 
 echo -e "Build complete, your app is here:\n"
-ls -lad $(pwd)/build-mac/Belnet\ Installer*
+ls -lad $(pwd)/build-mac/Belnet\ *
 echo ""
