@@ -7,7 +7,8 @@ set -o errexit
 
 bad=
 if [ "$DRONE_STAGE_OS" == "darwin" ]; then
-    if otool -L daemon/belnet | grep -Ev '^daemon/belnet:|^\t(/usr/lib/libSystem\.|/usr/lib/libc\+\+\.|/System/Library/Frameworks/CoreFoundation)'; then
+    if otool -L llarp/apple/org.belnet.network-extension.systemextension/Contents/MacOS/org.belnet.network-extension | \
+        grep -Ev '^llarp/apple:|^\t(/usr/lib/lib(System\.|c\+\+|objc)|/System/Library/Frameworks/(CoreFoundation|NetworkExtension|Foundation|Network)\.framework'; then
         bad=1
     fi
 elif [ "$DRONE_STAGE_OS" == "linux" ]; then
