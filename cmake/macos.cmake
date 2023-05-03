@@ -14,6 +14,8 @@ if(MACOS_SYSTEM_EXTENSION)
 endif()
 set(CODESIGN_PROFILE "${PROJECT_SOURCE_DIR}/contrib/macos/belnet.${default_profile_type}.provisionprofile" CACHE FILEPATH
   "Path to a .provisionprofile to use for the main app")
+set(CODESIGN_EXT_PROFILE "${PROJECT_SOURCE_DIR}/contrib/macos/belnet-extension.${default_profile_type}.provisionprofile" CACHE FILEPATH
+  "Path to a .provisionprofile to use for the belnet extension")
 
 if(CODESIGN AND NOT CODESIGN_ID)
   if(MACOS_SYSTEM_EXTENSION)
@@ -58,14 +60,15 @@ else()
   message(WARNING "Codesigning disabled; the resulting build will not run on most macOS systems")
 endif()
 
-
-if(NOT CODESIGN_PROFILE)
-  message(WARNING "Missing a CODESIGN_PROFILE provisioning profile: Apple will most likely log an uninformative error message to the system log and then kill harmless kittens if you try to run the result")
-endif()
-if(NOT EXISTS "${CODESIGN_PROFILE}")
-  message(FATAL_ERROR "Provisioning profile ${CODESIGN_PROFILE} does not exist; fix your -DCODESIGN_PROFILE path")
-endif()
-message(STATUS "Using ${CODESIGN_PROFILE} provisioning profile")
+foreach(prof IN ITEMS CODESIGN_PROFILE CODESIGN_EXT_PROFILE)
+  if(NOT ${prof})
+    message(WARNING "Missing a ${prof} provisioning profile: Apple will most likely log an uninformative error message to the system log and then kill harmless kittens if you try to run the result")
+  elseif(NOT EXISTS "${${prof}}")
+    message(FATAL_ERROR "Provisioning profile ${${prof}} does not exist; fix your -D${prof} path")
+  endif()
+endforeach()
+message(STATUS "Using ${CODESIGN_PROFILE} app provisioning profile")
+message(STATUS "Using ${CODESIGN_EXT_PROFILE} extension provisioning profile")
 
 set(belnet_installer "${PROJECT_BINARY_DIR}/Belnet Installer")
 set(belnet_app "${belnet_installer}/Belnet.app")
