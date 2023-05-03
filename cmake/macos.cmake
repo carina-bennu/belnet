@@ -71,6 +71,9 @@ message(STATUS "Using ${CODESIGN_PROFILE} app provisioning profile")
 message(STATUS "Using ${CODESIGN_EXT_PROFILE} extension provisioning profile")
 
 set(belnet_installer "${PROJECT_BINARY_DIR}/Belnet ${PROJECT_VERSION}")
+if(NOT CODESIGN)
+  set(belnet_installer "${belnet_installer}-UNSIGNED")
+endif()
 set(belnet_app "${belnet_installer}/Belnet.app")
 
 
@@ -202,9 +205,9 @@ function(macos_target_setup)
     COMMAND cp -a "${mac_icon}" "${belnet_app}/Contents/Resources/icon.icns"
   )
 
-  if(CODESIGN AND BUILD_GUI)
+  if(BUILD_GUI)
     add_dependencies(sign assemble_gui)
-  elseif(CODESIGN)
+  else()
     add_dependencies(sign assemble)
   endif()
 endfunction()
