@@ -2,6 +2,7 @@
 #include "abstractrouter.hpp"
 #include "net/sock_addr.hpp"
 #include <llarp/service/context.hpp>
+#include <llarp/dns/resolver.hpp>
 #include <unordered_set>
 
 namespace llarp
@@ -163,6 +164,27 @@ namespace llarp
   }
 
   void
+  RoutePoker::SetDNSMode(bool exit_mode_on) const
+  {
+    if (auto dns = m_Router->hiddenServiceContext().GetDefault()->DNS())
+    {
+      if (auto maybe_addr = dns->FirstBoundPacketSourceAddr())
+      {
+        if (dns::set_resolver(
+                m_Router->hiddenServiceContext().GetDefault()->GetIfName(),
+                *maybe_addr,
+                exit_mode_on))
+        {
+          LogInfo(
+              "DNS set to ",
+              *maybe_addr,
+              exit_mode_on ? " for all traffic" : " for just belnet traffic");
+        }
+      }
+    }
+  }
+
+  void
   RoutePoker::Enable()
   {
     if (m_Enabled)
@@ -180,6 +202,8 @@ namespace llarp
         m_Router->hiddenServiceContext().GetDefault()->GetIfName(),
         m_Router->GetConfig()->dns.m_bind,
         true /* route all DNS */);
+
+    SetDNSMode(true);
   }
 
   void
@@ -191,10 +215,7 @@ namespace llarp
     DisableAllRoutes();
     m_Enabled = false;
 
-    systemd_resolved_set_dns(
-        m_Router->hiddenServiceContext().GetDefault()->GetIfName(),
-        m_Router->GetConfig()->dns.m_bind,
-        false /* route DNS only for .bdx/.mnode */);
+    SetDNSMode(false);
   }
 
   void
