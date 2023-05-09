@@ -45,6 +45,11 @@ namespace llarp
   struct I_RCLookupHandler;
   struct RoutePoker;
 
+  namespace dns
+  {
+    class I_SystemSettings;
+  }
+
 
    namespace net
   {
@@ -356,7 +361,10 @@ namespace llarp
     }
 
     virtual int
-    OutboundUDPSocket() const = 0;
+    OutboundUDPSocket() const
+    {
+      return -1;
+    }
 
    protected:
     /// Virtual function to handle RouterEvent. HiveRouter overrides this in
