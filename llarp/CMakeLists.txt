@@ -53,10 +53,7 @@ if (ANDROID)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  if(NON_PC_TARGET)
-    add_import_library(rt)
-    target_link_libraries(belnet-platform PUBLIC rt)
-  endif()
+  target_sources(belnet-platform PRIVATE linux/dbus.cpp)
 endif()
 
 if (WIN32)
