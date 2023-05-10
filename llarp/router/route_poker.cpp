@@ -184,11 +184,6 @@ namespace llarp
       m_Enabled = true;
     }
 
-    systemd_resolved_set_dns(
-        m_Router->hiddenServiceContext().GetDefault()->GetIfName(),
-        m_Router->GetConfig()->dns.m_bind,
-        true /* route all DNS */);
-
     SetDNSMode(true);
   }
 
