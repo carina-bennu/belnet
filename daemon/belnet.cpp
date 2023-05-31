@@ -682,7 +682,7 @@ win32_daemon_entry(DWORD argc, LPTSTR* argv)
   ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 3000);
   // SCM clobbers startup args, regenerate them here
   argc = 2;
-  argv[1] = strdup("c:/programdata/belnet/belnet.ini");
+  argv[1] = strdup("c:\\programdata\\belnet\\belnet.ini");
   argv[2] = nullptr;
   belnet_main(argc, argv);
 }
