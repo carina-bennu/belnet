@@ -18,12 +18,8 @@ target_sources(belnet-platform PRIVATE vpn_platform.cpp vpn_interface.cpp route_
 add_executable(belnet-extension MACOSX_BUNDLE
   PacketTunnelProvider.m
   DNSTrampoline.m
-  )
+)
 enable_lto(belnet-extension)
-target_link_libraries(belnet-extension PRIVATE
-  libbelnet
-  ${COREFOUNDATION}
-  ${NETEXT})
 
 # -fobjc-arc enables automatic reference counting for objective-C code
 # -e _NSExtensionMain because the appex has that instead of a `main` function entry point, of course.
@@ -42,6 +38,11 @@ else()
     set(bundle_ext appex)
     set(product_type com.apple.product-type.app-extension)
 endif()
+
+target_link_libraries(belnet-extension PRIVATE
+  belnet-amalgum
+  ${COREFOUNDATION}
+  ${NETEXT})
 
 set_target_properties(belnet-extension PROPERTIES
   BUNDLE TRUE

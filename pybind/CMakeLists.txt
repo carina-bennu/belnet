@@ -16,6 +16,6 @@ pybind11_add_module(pyllarp MODULE
   llarp/tooling/router_event.cpp
   llarp/service/address.cpp
 )
-target_link_libraries(pyllarp PUBLIC libbelnet)
+target_link_libraries(pyllarp PUBLIC belnet-amalgum)
 target_include_directories(pyllarp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 

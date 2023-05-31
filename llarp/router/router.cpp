@@ -47,22 +47,21 @@ namespace llarp
   static auto logcat = log::Cat("router");
 
   Router::Router(EventLoop_ptr loop, std::shared_ptr<vpn::Platform> vpnPlatform)
-      : ready(false)
-      , m_lmq(std::make_shared<oxenmq::OxenMQ>())
-      , _loop(std::move(loop))
-      , _vpnPlatform(std::move(vpnPlatform))
-      , paths(this)
-      , _exitContext(this)
-      , _dht(llarp_dht_context_new(this))
-      , m_DiskThread(m_lmq->add_tagged_thread("disk"))
-      , inbound_link_msg_parser(this)
-      , _hiddenServiceContext(this)
-      , m_RPCServer(new rpc::RpcServer(m_lmq, this))
-#ifdef BELNET_HIVE
-      , _randomStartDelay(std::chrono::milliseconds((llarp::randint() % 1250) + 2000))
-#else
-      , _randomStartDelay(std::chrono::seconds((llarp::randint() % 30) + 10))
-#endif
+      : ready{false}
+      , m_lmq{std::make_shared<oxenmq::OxenMQ>()}
+      , _loop{std::move(loop)}
+      , _vpnPlatform{std::move(vpnPlatform)}
+      , paths{this}
+      , _exitContext{this}
+      , _dht{llarp_dht_context_new(this)}
+      , m_DiskThread{m_lmq->add_tagged_thread("disk")}
+      , inbound_link_msg_parser{this}
+      , _hiddenServiceContext{this}
+      , m_RoutePoker{std::make_shared<RoutePoker>()}
+      , m_RPCServer{new rpc::RpcServer{m_lmq, this}}
+      , _randomStartDelay{
+            platform::is_simulation ? std::chrono::milliseconds{(llarp::randint() % 1250) + 2000}
+                                    : 0s}
   {
     m_keyManager = std::make_shared<KeyManager>();
     // for beldexd, so we don't close the connection when syncing the whitelist
@@ -212,8 +211,21 @@ namespace llarp
   }
 
   void
+  Router::Freeze()
+  {
+    if (IsMasterNode())
+      return;
+    linkManager().ForEachPeer([](auto peer) {
+      if (peer)
+        peer->Close();
+    });
+  }
+
+  void
   Router::Thaw()
   {
+    if (IsMasterNode())
+      return;
     // get pubkeys we are connected to
     std::unordered_set<RouterID> peerPubkeys;
     linkManager().ForEachPeer([&peerPubkeys](auto peer) {
@@ -412,7 +424,6 @@ namespace llarp
     if (not EnsureIdentity())
       throw std::runtime_error("EnsureIdentity() failed");
 
-    m_RoutePoker.Init(this);
     return true;
   }
 
@@ -999,19 +1010,6 @@ namespace llarp
 
     _linkManager.CheckPersistingSessions(now);
 
-    if (not isSvcNode)
-    {
-      if (HasClientExit())
-      {
-        m_RoutePoker.Enable();
-      }
-      else
-      {
-        m_RoutePoker.Disable();
-      }
-      m_RoutePoker.Update();
-    }
-
     size_t connected = NumberOfConnectedRouters();
     if (not isSvcNode)
     {
@@ -1115,7 +1113,7 @@ namespace llarp
     if (const auto maybe = nodedb()->Get(remote); maybe.has_value())
     {
       for (const auto& addr : maybe->addrs)
-        m_RoutePoker.DelRoute(addr.toIpAddress().toIP());
+        m_RoutePoker->DelRoute(addr.IPv4());
     }
   }
 
@@ -1236,7 +1234,7 @@ namespace llarp
             throw std::runtime_error{"cannot override public ip, it is already set"};
           ai.fromSockAddr(*_ourAddress);
         }
-        if (RouterContact::BlockBogons && IsBogon(ai.ip))
+        if (RouterContact::BlockBogons && Net().IsBogon(ai.ip))
           throw std::runtime_error{var::visit(
               [](auto&& ip) {
                 return "cannot use " + ip.ToString()
@@ -1247,12 +1245,6 @@ namespace llarp
         _rc.addrs.push_back(ai);
       }
     });
-
-    if (ExitEnabled() and IsMasterNode())
-    {
-      LogError("exit mode not supported while master node");
-      return false;
-    }
 
     if (IsMasterNode() and not _rc.IsPublicRouter())
     {
@@ -1340,6 +1332,7 @@ namespace llarp
 
 
     _loop->call_every(ROUTER_TICK_INTERVAL, weak_from_this(), [this] { Tick(); });
+    m_RoutePoker->Start(this);
     _running.store(true);
     _startedAt = Now();
 #if defined(WITH_SYSTEMD)
@@ -1669,11 +1662,8 @@ namespace llarp
           [this](llarp::RouterContact rc) {
             if (IsMasterNode())
               return;
-            llarp::LogTrace(
-                "Before connect, outbound link adding route to (",
-                rc.addrs[0].toIpAddress().toIP(),
-                ") via gateway.");
-            m_RoutePoker.AddRoute(rc.addrs[0].toIpAddress().toIP());
+            for (const auto& addr : rc.addrs)
+              m_RoutePoker->AddRoute(addr.IPv4());
           },
           util::memFn(&Router::ConnectionEstablished, this),
           util::memFn(&AbstractRouter::CheckRenegotiateValid, this),

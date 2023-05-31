@@ -54,6 +54,8 @@ option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
 option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
 option(WITH_PEERSTATS "build with experimental peerstats db support" OFF)
+option(STRIP_SYMBOLS "strip off all debug symbols into an external archive for all executables built" OFF)
+
 
 include(cmake/enable_lto.cmake)
 
@@ -72,6 +74,12 @@ endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
+endif()
+
+set(debug OFF)
+if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
+  set(debug ON)
+  add_definitions(-DBELNET_DEBUG)
 endif()
 
 if(BUILD_STATIC_DEPS AND STATIC_LINK)
@@ -166,10 +174,17 @@ endif()
 
 
 
-if(NOT APPLE)
-add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Wno-deprecated-declarations -Werror=vla)
+if(APPLE)
+  add_compile_options(-Wno-deprecated-declarations)
+else()
+  add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Werror=vla)
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wno-unknown-warning-option)
+  endif()
+  if(debug)
+    add_compile_options(-Wdeprecated-declarations)
+  else()
+    add_compile_options(-Wno-deprecated-declarations)
   endif()
 endif()
 
@@ -179,10 +194,6 @@ if(XSAN)
     string(APPEND CMAKE_${type}_LINKER_FLAGS_DEBUG " -fsanitize=${XSAN} -fno-omit-frame-pointer -fno-sanitize-recover")
   endforeach()
   message(STATUS "Doing a ${XSAN} sanitizer build")
-endif()
-
-if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
-  add_definitions(-DBELNET_DEBUG)
 endif()
 
 include(cmake/coverage.cmake)
@@ -311,6 +322,10 @@ if(NOT TARGET uninstall)
 endif()
 
 
-if(BUILD_PACKAGE)
-    include(cmake/installer.cmake)
+if(BUILD_PACKAGE AND NOT APPLE)
+  include(cmake/installer.cmake)
+endif()
+
+if(TARGET package)
+  add_dependencies(package assemble_gui)
 endif()

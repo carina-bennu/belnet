@@ -101,7 +101,7 @@ install_win32_daemon()
   // Create the service
   schService = CreateService(
       schSCManager,               // SCM database
-      "belnet",                  // name of service
+      strdup("belnet"),          // name of service
       "Belnet for Windows",      // service name to display
       SERVICE_ALL_ACCESS,         // desired access
       SERVICE_WIN32_OWN_PROCESS,  // service type
@@ -134,10 +134,10 @@ insert_description()
   SC_HANDLE schSCManager;
   SC_HANDLE schService;
   SERVICE_DESCRIPTION sd;
-  LPTSTR szDesc =
+  LPTSTR szDesc = strdup(
       "BelNET is a free, open source, private, "
       "decentralized, \"market based sybil resistant\" "
-      "and IP based onion routing network";
+      "and IP based onion routing network");
   // Get a handle to the SCM database.
   schSCManager = OpenSCManager(
       NULL,                    // local computer
@@ -270,7 +270,7 @@ run_main_context(std::optional<fs::path> confFile, const llarp::RuntimeOptions o
     }
     catch (std::exception& ex)
     {
-      llarp::LogError("failed to start up belnet: {}", ex.what());
+      llarp::LogError(fmt::format("failed to start up belnet: {}", ex.what()));
       exit_code.set_value(1);
       return;
     }
@@ -367,7 +367,7 @@ main(int argc, char* argv[])
   return belnet_main(argc, argv);
 #else
   SERVICE_TABLE_ENTRY DispatchTable[] = {
-      {"belnet", (LPSERVICE_MAIN_FUNCTION)win32_daemon_entry}, {NULL, NULL}};
+      {strdup("belnet"), (LPSERVICE_MAIN_FUNCTION)win32_daemon_entry}, {NULL, NULL}};
   if (lstrcmpi(argv[1], "--win32-daemon") == 0)
   {
     start_as_daemon = true;
@@ -682,7 +682,7 @@ win32_daemon_entry(DWORD argc, LPTSTR* argv)
   ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 3000);
   // SCM clobbers startup args, regenerate them here
   argc = 2;
-  argv[1] = "c:/programdata/belnet/belnet.ini";
+  argv[1] = strdup("c:/programdata/belnet/belnet.ini");
   argv[2] = nullptr;
   belnet_main(argc, argv);
 }

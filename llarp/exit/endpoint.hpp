@@ -58,8 +58,7 @@ namespace llarp
 
       /// queue traffic from master node / internet to be transmitted
       bool
-      QueueInboundTraffic(ManagedBuffer buff, service::ProtocolType t);
-
+      QueueInboundTraffic(std::vector<byte_t> data, service::ProtocolType t);
       /// flush inbound and outbound traffic queues
       bool
       Flush();
@@ -68,7 +67,7 @@ namespace llarp
       /// does ip rewrite here
       bool
       QueueOutboundTraffic(
-          PathID_t txid, ManagedBuffer pkt, uint64_t counter, service::ProtocolType t);
+          PathID_t txid, std::vector<byte_t> data, uint64_t counter, service::ProtocolType t);
 
       /// update local path id and cascade information to parent
       /// return true if success
@@ -122,7 +121,7 @@ namespace llarp
 
       struct UpstreamBuffer
       {
-        UpstreamBuffer(const llarp::net::IPPacket& p, uint64_t c) : pkt(p), counter(c)
+        UpstreamBuffer(llarp::net::IPPacket p, uint64_t c) : pkt{std::move(p)}, counter(c)
         {}
 
         llarp::net::IPPacket pkt;
