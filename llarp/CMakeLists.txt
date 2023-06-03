@@ -116,7 +116,6 @@ target_link_libraries(belnet-config PUBLIC belnet-dns belnet-platform oxenmq::ox
 
 add_library(belnet-amalgum
   STATIC
-  consensus/table.cpp
   consensus/reachability_testing.cpp
 
   bootstrap.cpp

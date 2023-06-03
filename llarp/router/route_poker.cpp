@@ -118,7 +118,7 @@ namespace llarp
   {
     if (not m_Router)
       throw std::runtime_error{"Attempting to use RoutePoker before calling Init"};
-    if (m_Router->IsServiceNode())
+    if (m_Router->IsMasterNode())
       return false;
     if (const auto& conf = m_Router->GetConfig())
       return conf->network.m_EnableRoutePoker;
