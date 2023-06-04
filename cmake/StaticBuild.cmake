@@ -318,8 +318,11 @@ build_external(sodium CONFIGURE_COMMAND ./configure ${cross_host} ${cross_rc} --
           --enable-static --with-pic "CC=${deps_cc}" "CFLAGS=${deps_CFLAGS}")
 add_static_target(sodium sodium_external libsodium.a)
 
-build_external(sqlite3)
-add_static_target(sqlite3 sqlite3_external libsqlite3.a)
+
+if(WITH_PEERSTATS_BACKEND)
+  build_external(sqlite3)
+  add_static_target(sqlite3 sqlite3_external libsqlite3.a)
+endif()
 
 
 if(ARCH_TRIPLET MATCHES mingw)
@@ -331,7 +334,9 @@ endif()
 
 if(CMAKE_CROSSCOMPILING AND ARCH_TRIPLET MATCHES mingw)
   set(zmq_patch
-    PATCH_COMMAND ${PROJECT_SOURCE_DIR}/contrib/apply-patches.sh ${PROJECT_SOURCE_DIR}/contrib/patches/libzmq-mingw-wepoll.patch ${PROJECT_SOURCE_DIR}/contrib/patches/libzmq-mingw-closesocket.patch)
+  PATCH_COMMAND ${PROJECT_SOURCE_DIR}/contrib/apply-patches.sh
+  ${PROJECT_SOURCE_DIR}/contrib/patches/libzmq-mingw-wepoll.patch
+  ${PROJECT_SOURCE_DIR}/contrib/patches/libzmq-mingw-unistd.patch)
 endif()
 
 build_external(zmq
@@ -423,7 +428,6 @@ foreach(curl_arch ${curl_arches})
   list(APPEND curl_lib_outputs ${curl_prefix}/lib/libcurl.a)
 endforeach()
 
-message(STATUS "TARGETS: ${curl_lib_targets}")
 
 if(IOS AND num_arches GREATER 1)
   # We are building multiple architectures for different iOS devices, so we need to glue the

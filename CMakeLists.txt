@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)  # bionic's cmake version
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Has to be set before `project()`, and ignored on non-macos:
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15 CACHE STRING "macOS deployment target (Apple clang only)")
 
 option(BUILD_DAEMON "build belnet daemon and associated utils" ON)
 
@@ -31,7 +31,7 @@ project(belnet
 if(APPLE)
     # Apple build number: must be incremented to submit a new build for the same belnet version,
     # should be reset to 0 when the belnet version increments.
-    set(BELNET_APPLE_BUILD 0)
+    set(BELNET_APPLE_BUILD 4)
 endif()
 
 set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
@@ -53,6 +53,9 @@ option(WITH_TESTS "build unit tests" OFF)
 option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
 option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
+option(WITH_PEERSTATS "build with experimental peerstats db support" OFF)
+option(STRIP_SYMBOLS "strip off all debug symbols into an external archive for all executables built" OFF)
+
 
 include(cmake/enable_lto.cmake)
 
@@ -73,9 +76,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+set(debug OFF)
+if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
+  set(debug ON)
+  add_definitions(-DBELNET_DEBUG)
+endif()
+
+option(WARN_DEPRECATED "show deprecation warnings" ${debug})
+
 if(BUILD_STATIC_DEPS AND STATIC_LINK)
   message(STATUS "we are building static deps so we won't build shared libs")
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
 endif()
 
 include(CheckCXXSourceCompiles)
@@ -98,6 +109,7 @@ endif()
 
 include(cmake/solaris.cmake)
 include(cmake/win32.cmake)
+include(cmake/macos.cmake)
 
 # No in-source building
 include(MacroEnsureOutOfSourceBuild)
@@ -164,10 +176,17 @@ endif()
 
 
 
-if(NOT APPLE)
-add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Wno-deprecated-declarations -Werror=vla)
+if(APPLE)
+  add_compile_options(-Wno-deprecated-declarations)
+else()
+  add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Werror=vla)
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wno-unknown-warning-option)
+  endif()
+  if(WARN_DEPRECATED)
+    add_compile_options(-Wdeprecated-declarations)
+  else()
+    add_compile_options(-Wno-deprecated-declarations)
   endif()
 endif()
 
@@ -177,10 +196,6 @@ if(XSAN)
     string(APPEND CMAKE_${type}_LINKER_FLAGS_DEBUG " -fsanitize=${XSAN} -fno-omit-frame-pointer -fno-sanitize-recover")
   endforeach()
   message(STATUS "Doing a ${XSAN} sanitizer build")
-endif()
-
-if(CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]")
-  add_definitions(-DBELNET_DEBUG)
 endif()
 
 include(cmake/coverage.cmake)
@@ -251,7 +266,6 @@ if(WITH_SYSTEMD AND (NOT ANDROID))
 endif()
 
 add_subdirectory(external)
-include_directories(SYSTEM external/sqlite_orm/include)
 
 if(USE_JEMALLOC AND NOT STATIC_LINK)
   pkg_check_modules(JEMALLOC jemalloc IMPORTED_TARGET)
@@ -292,6 +306,12 @@ endif()
 
 add_subdirectory(docs)
 
+include(cmake/gui.cmake)
+
+if(APPLE)
+  macos_target_setup()
+endif()
+
 # uninstall target
 if(NOT TARGET uninstall)
   configure_file(
@@ -305,5 +325,9 @@ endif()
 
 
 if(BUILD_PACKAGE AND NOT APPLE)
-    include(cmake/installer.cmake)
+  include(cmake/installer.cmake)
+endif()
+
+if(TARGET package)
+  add_dependencies(package assemble_gui)
 endif()

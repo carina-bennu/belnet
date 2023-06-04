@@ -3,10 +3,11 @@
 #include <cassert>
 #include <llarp/net/ip_packet.hpp>
 #include <llarp/config/config.hpp>
+#include <llarp/constants/apple.hpp>
 #include <llarp/util/fs.hpp>
-#include <llarp/util/logging/buffer.hpp>
 #include <uvw/loop.h>
-#include <llarp/util/logging/logger.hpp>
+#include <llarp/util/logging.hpp>
+#include <llarp/util/logging/buffer.hpp>
 #include <llarp/util/logging/callback_sink.hpp>
 #include "vpn_interface.hpp"
 #include "context_wrapper.h"
@@ -14,10 +15,6 @@
 
 namespace
 {
-  // The default 127.0.0.1:53 won't work (because we run unprivileged) so remap it to this (unless
-  // specifically overridden to something else in the config):
-  const llarp::SockAddr DefaultDNSBind{"127.0.0.1:1153"};
-
   struct instance_data
   {
     llarp::apple::Context context;
@@ -30,15 +27,17 @@ namespace
 
 }  // namespace
 
-const uint16_t dns_trampoline_port = 1053;
+// Expose this with C linkage so that objective-c can use it
+extern "C" const uint16_t dns_trampoline_port = llarp::apple::dns_trampoline_port;
 
 void*
 llarp_apple_init(llarp_apple_config* appleconf)
 {
-  llarp::log::ReplaceLogger(std::make_shared<llarp::log::CallbackSink_mt>(
+  llarp::log::clear_sinks();
+  llarp::log::add_sink(std::make_shared<llarp::logging::CallbackSink_mt>(
       [](const char* msg, void* nslog) { reinterpret_cast<ns_logger_callback>(nslog)(msg); },
       nullptr,
-      appleconf->ns_logger));
+      reinterpret_cast<void*>(appleconf->ns_logger)));
 
   try
   {
@@ -88,10 +87,12 @@ llarp_apple_init(llarp_apple_config* appleconf)
       }
     }
 
-    // The default DNS bind setting just isn't something we can use as a non-root network extension
-    // so remap the default value to a high port unless explicitly set to something else.
-    if (config->dns.m_bind == llarp::SockAddr{"127.0.0.1:53"})
-      config->dns.m_bind = DefaultDNSBind;
+#ifdef MACOS_SYSTEM_EXTENSION
+    std::strncpy(
+        appleconf->dns_bind_ip,
+        config->dns.m_bind.hostString().c_str(),
+        sizeof(appleconf->dns_bind_ip));
+#endif
 
     // If no explicit bootstrap then set the system default one included with the app bundle
     if (config->bootstrap.files.empty())
@@ -169,20 +170,26 @@ llarp_apple_get_uv_loop(void* belnet)
 }
 
 int
-llarp_apple_incoming(void* belnet, const void* bytes, size_t size)
+llarp_apple_incoming(void* belnet, const llarp_incoming_packet* packets, size_t size)
 {
   auto& inst = *static_cast<instance_data*>(belnet);
 
   auto iface = inst.iface.lock();
   if (!iface)
-    return -2;
+    return -1;
 
-  llarp_buffer_t buf{static_cast<const uint8_t*>(bytes), size};
-  if (iface->OfferReadPacket(buf))
-    return 0;
+  int count = 0;
+  for (size_t i = 0; i < size; i++)
+  {
+    llarp_buffer_t buf{static_cast<const uint8_t*>(packets[i].bytes), packets[i].size};
+    if (iface->OfferReadPacket(buf))
+      count++;
+    else
+      llarp::LogError("invalid IP packet: ", llarp::buffer_printer(buf));
+  }
 
-  llarp::LogError("invalid IP packet: ", llarp::buffer_printer(buf));
-  return -1;
+  iface->MaybeWakeUpperLayers();
+  return count;
 }
 
 void

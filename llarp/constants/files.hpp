@@ -1,4 +1,5 @@
 #pragma once
+#include "platform.hpp"
 
 #include <llarp/util/fs.hpp>
 
@@ -21,20 +22,23 @@ namespace llarp
   inline fs::path
   GetDefaultDataDir()
   {
-#ifdef _WIN32
-    return "C:/programdata/belnet";
-#else
-    fs::path datadir{"/var/lib/belnet"};
-
-    if (auto uid = ::geteuid())
+    if constexpr (not platform::is_windows)
     {
-      if (auto* pw = getpwuid(uid))
+      fs::path datadir{"/var/lib/belnet"};
+#ifndef _WIN32
+      if (auto uid = geteuid())
       {
-        datadir = fs::path{pw->pw_dir} / ".belnet";
+        if (auto* pw = getpwuid(uid))
+        {
+          datadir = fs::path{pw->pw_dir} / ".belnet";
+        }
       }
-    }
-    return datadir;
+    
 #endif
+      return datadir;
+    }
+    else
+      return "C:\\ProgramData\\Belnet";
   }
 
   inline fs::path

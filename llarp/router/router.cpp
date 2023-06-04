@@ -44,23 +44,24 @@ static constexpr std::chrono::milliseconds ROUTER_TICK_INTERVAL = 250ms;
 
 namespace llarp
 {
+  static auto logcat = log::Cat("router");
+
   Router::Router(EventLoop_ptr loop, std::shared_ptr<vpn::Platform> vpnPlatform)
-      : ready(false)
-      , m_lmq(std::make_shared<oxenmq::OxenMQ>())
-      , _loop(std::move(loop))
-      , _vpnPlatform(std::move(vpnPlatform))
-      , paths(this)
-      , _exitContext(this)
-      , _dht(llarp_dht_context_new(this))
-      , m_DiskThread(m_lmq->add_tagged_thread("disk"))
-      , inbound_link_msg_parser(this)
-      , _hiddenServiceContext(this)
-      , m_RPCServer(new rpc::RpcServer(m_lmq, this))
-#ifdef BELNET_HIVE
-      , _randomStartDelay(std::chrono::milliseconds((llarp::randint() % 1250) + 2000))
-#else
-      , _randomStartDelay(std::chrono::seconds((llarp::randint() % 30) + 10))
-#endif
+      : ready{false}
+      , m_lmq{std::make_shared<oxenmq::OxenMQ>()}
+      , _loop{std::move(loop)}
+      , _vpnPlatform{std::move(vpnPlatform)}
+      , paths{this}
+      , _exitContext{this}
+      , _dht{llarp_dht_context_new(this)}
+      , m_DiskThread{m_lmq->add_tagged_thread("disk")}
+      , inbound_link_msg_parser{this}
+      , _hiddenServiceContext{this}
+      , m_RoutePoker{std::make_shared<RoutePoker>()}
+      , m_RPCServer{new rpc::RpcServer{m_lmq, this}}
+      , _randomStartDelay{
+            platform::is_simulation ? std::chrono::milliseconds{(llarp::randint() % 1250) + 2000}
+                                    : 0s}
   {
     m_keyManager = std::make_shared<KeyManager>();
     // for beldexd, so we don't close the connection when syncing the whitelist
@@ -210,8 +211,21 @@ namespace llarp
   }
 
   void
+  Router::Freeze()
+  {
+    if (IsMasterNode())
+      return;
+    linkManager().ForEachPeer([](auto peer) {
+      if (peer)
+        peer->Close();
+    });
+  }
+
+  void
   Router::Thaw()
   {
+    if (IsMasterNode())
+      return;
     // get pubkeys we are connected to
     std::unordered_set<RouterID> peerPubkeys;
     linkManager().ForEachPeer([&peerPubkeys](auto peer) {
@@ -410,7 +424,6 @@ namespace llarp
     if (not EnsureIdentity())
       throw std::runtime_error("EnsureIdentity() failed");
 
-    m_RoutePoker.Init(this);
     return true;
   }
 
@@ -772,6 +785,7 @@ namespace llarp
 
     if (log::get_level_default() != log::Level::off)
       log::reset_level(conf.logging.m_logLevel);
+    log::clear_sinks();
     log::add_sink(log_type, conf.logging.m_logFile);
 
     return true;
@@ -930,25 +944,49 @@ namespace llarp
     nodedb()->RemoveIf([&](const RouterContact& rc) -> bool {
       // don't purge bootstrap nodes from nodedb
       if (IsBootstrapNode(rc.pubkey))
+      {
+        log::debug(logcat, "Not removing {}: is bootstrap node", rc.pubkey);
         return false;
+      }
       // if for some reason we stored an RC that isn't a valid router
       // purge this entry
       if (not rc.IsPublicRouter())
+      {
+        log::debug(logcat, "Removing {}: not a valid router", rc.pubkey);
         return true;
-      // clients have a notion of a whilelist
+      }
+      /// clear out a fully expired RC
+      if (rc.IsExpired(now))
+      {
+        log::debug(logcat, "Removing {}: RC is expired", rc.pubkey);
+        return true;
+      }
+      // clients have no notion of a whilelist
       // we short circuit logic here so we dont remove
       // routers that are not whitelisted for first hops
       if (not isSvcNode)
+      {
+        log::trace(logcat, "Not removing {}: we are a client and it looks fine", rc.pubkey);
         return false;
+      }
+
       // if we have a whitelist enabled and we don't
       // have the whitelist yet don't remove the entry
       if (whitelistRouters and not gotWhitelist)
+      {
+        log::debug(logcat, "Skipping check on {}: don't have whitelist yet", rc.pubkey);
         return false;
+      }
       // if we have no whitelist enabled or we have
       // the whitelist enabled and we got the whitelist
       // check against the whitelist and remove if it's not
       // in the whitelist OR if there is no whitelist don't remove
-      return not _rcLookupHandler.SessionIsAllowed(rc.pubkey);
+      if (gotWhitelist and not _rcLookupHandler.SessionIsAllowed(rc.pubkey))
+      {
+        log::debug(logcat, "Removing {}: not a valid router", rc.pubkey);
+        return true;
+      }
+      return false;
     });
 
     // find all deregistered relays
@@ -971,19 +1009,6 @@ namespace llarp
       _linkManager.DeregisterPeer(std::move(peer));
 
     _linkManager.CheckPersistingSessions(now);
-
-    if (not isSvcNode)
-    {
-      if (HasClientExit())
-      {
-        m_RoutePoker.Enable();
-      }
-      else
-      {
-        m_RoutePoker.Disable();
-      }
-      m_RoutePoker.Update();
-    }
 
     size_t connected = NumberOfConnectedRouters();
     if (not isSvcNode)
@@ -1088,7 +1113,7 @@ namespace llarp
     if (const auto maybe = nodedb()->Get(remote); maybe.has_value())
     {
       for (const auto& addr : maybe->addrs)
-        m_RoutePoker.DelRoute(addr.toIpAddress().toIP());
+        m_RoutePoker->DelRoute(addr.IPv4());
     }
   }
 
@@ -1182,11 +1207,7 @@ namespace llarp
     return true;
   }
 
-    int
-  Router::OutboundUDPSocket() const
-  {
-    return m_OutboundUDPSocket;
-  }
+  
 
   bool
   Router::Run()
@@ -1213,7 +1234,7 @@ namespace llarp
             throw std::runtime_error{"cannot override public ip, it is already set"};
           ai.fromSockAddr(*_ourAddress);
         }
-        if (RouterContact::BlockBogons && IsBogon(ai.ip))
+        if (RouterContact::BlockBogons && Net().IsBogon(ai.ip))
           throw std::runtime_error{var::visit(
               [](auto&& ip) {
                 return "cannot use " + ip.ToString()
@@ -1224,12 +1245,6 @@ namespace llarp
         _rc.addrs.push_back(ai);
       }
     });
-
-    if (ExitEnabled() and IsMasterNode())
-    {
-      LogError("exit mode not supported while master node");
-      return false;
-    }
 
     if (IsMasterNode() and not _rc.IsPublicRouter())
     {
@@ -1317,6 +1332,7 @@ namespace llarp
 
 
     _loop->call_every(ROUTER_TICK_INTERVAL, weak_from_this(), [this] { Tick(); });
+    m_RoutePoker->Start(this);
     _running.store(true);
     _startedAt = Now();
 #if defined(WITH_SYSTEMD)
@@ -1392,8 +1408,6 @@ namespace llarp
         }
       });
     }
-    if (log::get_level_default() != log::Level::off)
-      log::reset_level(log::Level::warn);
     return _running;
   }
 
@@ -1637,7 +1651,7 @@ namespace llarp
     if (addrs.empty())
       addrs.emplace_back(Net().Wildcard());
 
-    for (auto bind_addr : addrs)
+    for (auto& bind_addr : addrs)
     {
       auto link = iwp::NewOutboundLink(
           m_keyManager,
@@ -1648,11 +1662,8 @@ namespace llarp
           [this](llarp::RouterContact rc) {
             if (IsMasterNode())
               return;
-            llarp::LogTrace(
-                "Before connect, outbound link adding route to (",
-                rc.addrs[0].toIpAddress().toIP(),
-                ") via gateway.");
-            m_RoutePoker.AddRoute(rc.addrs[0].toIpAddress().toIP());
+            for (const auto& addr : rc.addrs)
+              m_RoutePoker->AddRoute(addr.IPv4());
           },
           util::memFn(&Router::ConnectionEstablished, this),
           util::memFn(&AbstractRouter::CheckRenegotiateValid, this),
@@ -1663,13 +1674,19 @@ namespace llarp
 
       const auto& net = Net();
 
-      // try to use a public address if we have one set on our inbound links
-      _linkManager.ForEachInboundLink([&bind_addr, &net](const auto& link) {
-        if (not net.IsBogon(bind_addr))
-          return;
-        if (auto addr = link->LocalSocketAddr(); not net.IsBogon(addr))
-          bind_addr.setIP(addr.getIP());
-      });
+      // If outbound is set to wildcard and we have just one inbound, then bind to the inbound IP;
+      // if you have more than one inbound you have to be explicit about your outbound.
+      if (net.IsWildcardAddress(bind_addr.getIP()))
+      {
+        bool multiple = false;
+        _linkManager.ForEachInboundLink([&bind_addr, &multiple](const auto& link) {
+          if (multiple)
+            throw std::runtime_error{
+                "outbound= IP address must be specified when using multiple inbound= addresses"};
+          multiple = true;
+          bind_addr.setIP(link->LocalSocketAddr().getIP());
+        });
+      }
 
       link->Bind(this, bind_addr);
 

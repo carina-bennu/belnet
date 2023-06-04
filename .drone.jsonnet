@@ -53,8 +53,9 @@ local debian_pipeline(name, image,
                 'mkdir build',
                 'cd build',
                 'cmake .. -DWITH_SETCAP=OFF -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE='+build_type+' ' +
-                    (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
-                    '-DWITH_LTO=' + (if lto then 'ON ' else 'OFF ') +
+                (if build_type == 'Debug' then ' -DWARN_DEPRECATED=OFF ' else '') +
+                (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
+                '-DWITH_LTO=' + (if lto then 'ON ' else 'OFF ') +
                 cmake_extra,
                 'VERBOSE=1 make -j' + jobs,
                 '../contrib/ci/drone-gdb.sh ./test/testAll --use-colour yes',
@@ -88,7 +89,7 @@ local windows_cross_pipeline(name, image,
         lto=false,
         werror=false,
         cmake_extra='',
-        toolchain='32',
+        gui_zip_url='',
         extra_cmds=[],
         jobs=6,
         allow_fail=false) = {
@@ -103,16 +104,16 @@ local windows_cross_pipeline(name, image,
             name: 'build',
             image: image,
             [if allow_fail then "failure"]: "ignore",
-            environment: { SSH_KEY: { from_secret: "SSH_KEY" }, WINDOWS_BUILD_NAME: toolchain+"bit" },
+            environment: { SSH_KEY: { from_secret: 'SSH_KEY' }, WINDOWS_BUILD_NAME: '64bit' },
             commands: [
                 'echo "Building on ${DRONE_STAGE_MACHINE}"',
                 'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
                 apt_get_quiet + ' update',
                 apt_get_quiet + ' install -y eatmydata',
-                'eatmydata ' + apt_get_quiet + ' install -y build-essential cmake git pkg-config ccache g++-mingw-w64-x86-64-posix nsis zip automake libtool',
+                'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y p7zip-full build-essential cmake git pkg-config ccache g++-mingw-w64-x86-64-posix nsis zip automake libtool',
                 'update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix',
                 'update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix',
-                'VERBOSE=1 JOBS=' + jobs + ' ./contrib/windows.sh'
+                'JOBS=' + jobs + ' VERBOSE=1 ./contrib/windows.sh ' + (if std.length(gui_zip_url) > 0 then '-DBUILD_GUI=OFF -DGUI_ZIP_URL=' + gui_zip_url else '') + ' -DSTRIP_SYMBOLS=ON ' + ci_mirror_opts,
             ] + extra_cmds,
         }
     ],
@@ -150,6 +151,7 @@ local linux_cross_pipeline(name,
                            cmake_extra='',
                            extra_cmds=[],
                            jobs=6,
+                           codesign='-DCODESIGN=OFF',
                            allow_fail=false) = {
   kind: 'pipeline',
   type: 'docker',
@@ -245,13 +247,8 @@ local mac_builder(name,
                 // If you don't do this then the C compiler doesn't have an include path containing
                 // basic system headers.  WTF apple:
                 'export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"',
-                'ulimit -n 1024', // because macos sets ulimit to 256 for some reason yeah idk
-                'mkdir build',
-                'cd build',
-                'cmake .. -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE='+build_type+' ' +
-                    (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') + cmake_extra,
-                'VERBOSE=1 make -j' + jobs,
-                './test/testAll --use-colour yes',
+                'ulimit -n 1024', 
+                './contrib/mac.sh ' + ci_mirror_opts + (if build_type == 'Debug' then ' -DWARN_DEPRECATED=OFF ' else '') + codesign,
             ] + extra_cmds,
         }
     ]
@@ -312,10 +309,10 @@ local mac_builder(name,
     apk_builder("android apk", "registry.beldex.io/belnet-ci-android", extra_cmds=['UPLOAD_OS=android ./contrib/ci/drone-static-upload.sh']),
 
     // Windows builds (x64)
-    windows_cross_pipeline("Windows (amd64)", docker_base+'debian-win32-cross',
-        toolchain='64', extra_cmds=[
-          './contrib/ci/drone-static-upload.sh'
-    ]),
+    windows_cross_pipeline("Windows (amd64)", docker_base + 'nodejs-lts',
+                            extra_cmds=[
+                                './contrib/ci/drone-static-upload.sh'
+                            ]),
 
     // Static build (on bionic) which gets uploaded to builds.belnet.dev:
     debian_pipeline("Static (bionic amd64)", docker_base+'ubuntu-bionic', deps='g++-8 python3-dev automake libtool', lto=true,
@@ -339,7 +336,10 @@ local mac_builder(name,
     deb_builder(docker_base + 'debian-sid-builder', 'sid', 'debian/sid', arch='arm64'),
 
     // Macos builds:
-    mac_builder('macOS (Release)'),
+    mac_builder('macOS (Release)', extra_cmds=[
+    '../contrib/ci/drone-check-static-libs.sh',
+    '../contrib/ci/drone-static-upload.sh',
+  ]),
     mac_builder('macOS (Debug)', build_type='Debug'),
     mac_builder('macOS (Static)', cmake_extra='-DBUILD_STATIC_DEPS=ON -DBUILD_SHARED_LIBS=OFF -DSTATIC_LINK=ON -DDOWNLOAD_SODIUM=FORCE -DDOWNLOAD_CURL=FORCE -DDOWNLOAD_UV=FORCE',
                 extra_cmds=[

@@ -141,13 +141,13 @@ namespace llarp
             "this setting specifies the public IP at which this router is reachable. When",
             "provided the public-port option must also be specified.",
         },
-        [this](std::string arg) {
+        [this, net = params.Net_ptr()](std::string arg) {
           if (arg.empty())
             return;
           nuint32_t addr{};
           if (not addr.FromString(arg))
             throw std::invalid_argument{fmt::format("{} is not a valid IPv4 address", arg)};
-          if (IsIPv4Bogon(addr))
+          if (net->IsBogonIP(addr))
             throw std::invalid_argument{
                 fmt::format("{} is not a publicly routable ip address", addr)};
 
@@ -657,6 +657,7 @@ namespace llarp
             throw std::invalid_argument{
                 fmt::format("[network]:ip6-range invalid value: '{}'", arg)};
         });
+
     // TODO: could be useful for mnodes in the future, but currently only implemented for clients:
     conf.defineOption<std::string>(
         "network",
@@ -784,22 +785,24 @@ namespace llarp
     // Most non-linux platforms have loopback as 127.0.0.1/32, but linux uses 127.0.0.1/8 so that we
     // can bind to other 127.* IPs to avoid conflicting with something else that may be listening on
     // 127.0.0.1:53.
+    constexpr std::array DefaultDNSBind{
 #ifdef __linux__
-    constexpr Default DefaultDNSBind{"127.3.2.1:53"};
-#else
-    constexpr Default DefaultDNSBind{"127.0.0.1:53"};
+#ifdef WITH_SYSTEMD
+      Default{"127.0.0.1:0"},
 #endif
+      Default{"127.3.2.1:53"},
+#else
+      Default{"127.0.0.1:53"},
+#endif
+      };
 
     // Default, but if we get any upstream (including upstream=, i.e. empty string) we clear it
-    constexpr Default DefaultUpstreamDNS{"9.9.9.10"};
+    constexpr Default DefaultUpstreamDNS{"9.9.9.10:53"};
     m_upstreamDNS.emplace_back(DefaultUpstreamDNS.val);
-    if (!m_upstreamDNS.back().getPort())
-      m_upstreamDNS.back().setPort(53);
-
+  
     conf.defineOption<std::string>(
         "dns",
         "upstream",
-        DefaultUpstreamDNS,
         MultiValue,
         Comment{
             "Upstream resolver(s) to use as fallback for non-beldex addresses.",
@@ -811,25 +814,56 @@ namespace llarp
             m_upstreamDNS.clear();
             first = false;
           }
-          if (!arg.empty())
+          if (not arg.empty())
           {
             auto& entry = m_upstreamDNS.emplace_back(std::move(arg));
-            if (!entry.getPort())
+            if (not entry.getPort())
               entry.setPort(53);
           }
+        });
+
+    conf.defineOption<bool>(
+        "dns",
+        "l3-intercept",
+        Default{
+            platform::is_windows or platform::is_android
+            or (platform::is_macos and not platform::is_apple_sysex)},
+        Comment{"Intercept all dns traffic (udp/53) going into our belnet network interface "
+                "instead of binding a local udp socket"},
+        AssignmentAcceptor(m_raw_dns));
+
+    conf.defineOption<std::string>(
+        "dns",
+        "query-bind",
+#ifdef __APPLE__
+        Default{"127.0.0.1:1253"},
+#elif defined(_WIN32)
+        Default{"0.0.0.0:0"},
+#else
+        Hidden,
+#endif
+        Comment{
+            "Address to bind to for sending upstream DNS requests.",
+        },
+        [this](std::string arg) { m_QueryBind = SockAddr{arg}; 
+        
         });
 
     conf.defineOption<std::string>(
         "dns",
         "bind",
         DefaultDNSBind,
+        MultiValue,
         Comment{
             "Address to bind to for handling DNS requests.",
         },
         [=](std::string arg) {
-          m_bind = SockAddr{std::move(arg)};
-          if (!m_bind.getPort())
-            m_bind.setPort(53);
+          SockAddr addr{arg};
+          // set dns port if no explicit port specified
+          // explicit :0 allowed
+          if (not addr.getPort() and not ends_with(arg, ":0"))
+            addr.setPort(53);
+          m_bind.emplace_back(addr);
         });
 
     conf.defineOption<fs::path>(
@@ -856,6 +890,10 @@ namespace llarp
             "(This is not used directly by belnet itself, but by the belnet init scripts",
             "on systems which use resolveconf)",
         });
+        // forwad the rest to libunbound
+    conf.addUndeclaredHandler("dns", [this](auto, std::string_view key, std::string_view val) {
+      m_ExtraOpts.emplace(key, val);
+    });
   }
 
   void
@@ -864,34 +902,11 @@ namespace llarp
     conf.addSectionComments(
         "bind",
         {
-            "Typically this section can be left blank, but can be used to specify which sockets to "
-            "bind on for inbound and outbound traffic.",
-            "",
-            "If no inbound bind addresses are configured then belnet will search for a local ",
-            "network interface with a public IP address and use that IP with port 1090.",
-            "If no outbound bind addresses are configured then belnet will use a wildcard "
-            "address.",
-            "",
-            "Examples:",
-            "",
-            "    inbound=15.5.29.5:443",
-            "    inbound=10.0.2.2",
-            "    outbound=0.0.0.0:9000",
-            "",
-            "The first binds an inbound socket on local ip 15.5.29.5  with port 443; and the "
-            "second binds an inbound socket on local ip 10.0.2.2 with the default port, 1090; and "
-            "the third example binds an outbound socket on all interfaces with a pinned outbound "
-            "port on port 9000.",
-            "",
-            "Inbound sockets with a wildcard address or private range IP address (like the second "
-            "example entry) will require setting the public-ip= and public-port= settings with a "
-            "public address at which this router can be reached.",
-            "Inbound sockets can NOT have ports explicitly set to be 0.",
-            "",
-            "On setups with multiple public ip addresses on a network interface, the first ip will "
-            "be used as a default or when a wildcard is provided, unless explicitly set in config.",
-            "Setting the IP for both inbound and outbound sockets on machines with multiple public "
-            "ip addresses is highly recommended.",
+            "This section allows specifying the IPs that belnet uses for incoming and outgoing",
+            "connections.  For simple setups it can usually be left blank, but may be required",
+            "for routers with multiple IPs, or routers that must listen on a private IP with",
+            "forwarded public traffic.  It can also be useful for clients that want to use a",
+            "consistent outgoing port for which firewall rules can be configured.",
         });
 
     const auto* net_ptr = params.Net_ptr();
@@ -903,8 +918,11 @@ namespace llarp
         "bind",
         "public-ip",
         RelayOnly,
-        Comment{"set our public ip if it is different than the one we detect or if we are unable "
-                "to detect it"},
+        Comment{
+            "The IP address to advertise to the network instead of the incoming= or auto-detected",
+            "IP.  This is typically required only when incoming= is used to listen on an internal",
+            "private range IP address that received traffic forwarded from the public IP.",
+        },
         [this](std::string_view arg) {
           SockAddr pubaddr{arg};
           PublicAddress = pubaddr.getIP();
@@ -913,11 +931,15 @@ namespace llarp
         "bind",
         "public-port",
         RelayOnly,
-        Comment{"set our public port if it is different than the one we detect or if we are unable "
-                "to detect it"},
+        Comment{
+            "The port to advertise to the network instead of the incoming= (or default) port.",
+            "This is typically required only when incoming= is used to listen on an internal",
+            "private range IP address/port that received traffic forwarded from the public IP.",
+        },
         [this](uint16_t arg) { PublicPort = net::port_t::from_host(arg); });
 
-    auto parse_addr_for_link = [net_ptr](const std::string& arg, net::port_t default_port) {
+    auto parse_addr_for_link = [net_ptr](
+                                   const std::string& arg, net::port_t default_port, bool inbound) {
       std::optional<SockAddr> addr = std::nullopt;
       // explicitly provided value
       if (not arg.empty())
@@ -925,8 +947,9 @@ namespace llarp
         if (arg[0] == ':')
         {
           // port only case
-          auto port = net::port_t::from_string(arg.substr(1));
-          addr = net_ptr->WildcardWithPort(port);
+          default_port = net::port_t::from_string(arg.substr(1));
+          if (!inbound)
+            addr = net_ptr->WildcardWithPort(default_port);
         }
         else
         {
@@ -956,10 +979,25 @@ namespace llarp
         "inbound",
         RelayOnly,
         MultiValue,
-        Comment{""},
+        Comment{
+            "IP and/or port to listen on for incoming connections.",
+            "",
+            "If IP is omitted then belnet will search for a local network interface with a",
+            "public IP address and use that IP (and will exit with an error if no such IP is found",
+            "on the system).  If port is omitted then belnet defaults to 1090.",
+            "",
+            "Examples:",
+            "    inbound=15.5.29.5:443",
+            "    inbound=10.0.2.2",
+            "    inbound=:1234",
+            "",
+            "Using a private range IP address (like the second example entry) will require using",
+            "the public-ip= and public-port= to specify the public IP address at which this",
+            "router can be reached.",
+        },
         [this, parse_addr_for_link](const std::string& arg) {
           auto default_port = net::port_t::from_host(DefaultInboundPort.val);
-          if (auto addr = parse_addr_for_link(arg, default_port))
+          if (auto addr = parse_addr_for_link(arg, default_port, /*inbound=*/true))
             InboundListenAddrs.emplace_back(std::move(*addr));
         });
 
@@ -967,10 +1005,41 @@ namespace llarp
         "bind",
         "outbound",
         MultiValue,
-        Comment{""},
+        params.isRelay ? Comment{
+            "IP and/or port to use for outbound socket connections to other belnet routers.",
+            "",
+            "If no outbound bind IP is configured, or the 0.0.0.0 wildcard IP is given, then",
+            "belnet will bind to the same IP being used for inbound connections (either an",
+            "explicit inbound= provided IP, or the default).  If no port is given, or port is",
+            "given as 0, then a random high port will be used.",
+            "",
+            "If using multiple inbound= addresses then you *must* provide an explicit oubound= IP.",
+            "",
+            "Examples:",
+            "    outbound=1.2.3.4:5678",
+            "    outbound=:9000",
+            "    outbound=8.9.10.11",
+            "",
+            "The second example binds on the default incoming IP using port 9000; the third",
+            "example binds on the given IP address using a random high port.",
+        } : Comment{
+            "IP and/or port to use for outbound socket connections to belnet routers.",
+            "",
+            "If no outbound bind IP is configured then belnet will use a wildcard IP address",
+            "(equivalent to specifying 0.0.0.0).  If no port is given then a random high port",
+            "will be used.",
+            "",
+            "Examples:",
+            "    outbound=1.2.3.4:5678",
+            "    outbound=:9000",
+            "    outbound=8.9.10.11",
+            "",
+            "The second example binds on the wildcard address using port 9000; the third example",
+            "binds on the given IP address using a random high port.",
+        },
         [this, net_ptr, parse_addr_for_link](const std::string& arg) {
           auto default_port = net::port_t::from_host(DefaultOutboundPort.val);
-          auto addr = parse_addr_for_link(arg, default_port);
+          auto addr = parse_addr_for_link(arg, default_port, /*inbound=*/false);
           if (not addr)
             addr = net_ptr->WildcardWithPort(default_port);
           OutboundLinks.emplace_back(std::move(*addr));
@@ -980,9 +1049,9 @@ namespace llarp
 
         conf.addUndeclaredHandler(
         "bind", [this, net_ptr](std::string_view, std::string_view key, std::string_view val) {
-          LogError(
-              "using the [bind] section without inbound= or outbound= is deprecated and will stop "
-              "working in a future release");
+          LogWarn(
+              "using the [bind] section with *=/IP=/INTERFACE= is deprecated; use the inbound= "
+              "and/or outbound= settings instead");
           std::optional<SockAddr> addr;
           // special case: wildcard for outbound
           if (key == "*")
@@ -1304,15 +1373,25 @@ namespace llarp
   }
 
   void
-  Config::LoadOverrides()
+  Config::LoadOverrides(ConfigDefinition& conf) const
   {
+    ConfigParser parser;
     const auto overridesDir = GetOverridesDir(m_DataDir);
     if (fs::exists(overridesDir))
     {
       util::IterDir(overridesDir, [&](const fs::path& overrideFile) {
         if (overrideFile.extension() == ".ini")
         {
-          m_Parser.LoadFile(overrideFile);
+          ConfigParser parser;
+          if (not parser.LoadFile(overrideFile))
+            throw std::runtime_error{"cannot load '" + overrideFile.u8string() + "'"};
+
+          parser.IterAll([&](std::string_view section, const SectionValues_t& values) {
+            for (const auto& pair : values)
+            {
+              conf.addConfigValue(section, pair.first, pair.second);
+            }
+          });
         }
         return true;
       });
@@ -1326,7 +1405,7 @@ namespace llarp
   }
 
   bool
-  Config::LoadString(std::string_view ini, bool isRelay)
+  Config::LoadConfigData(std::string_view ini, std::optional<fs::path> filename, bool isRelay)
   {
     auto params = MakeGenParams();
     params->isRelay = isRelay;
@@ -1334,7 +1413,19 @@ namespace llarp
     ConfigDefinition conf{isRelay};
     initializeConfig(conf, *params);
 
+    for (const auto& item : m_Additional)
+    {
+      conf.addConfigValue(item[0], item[1], item[2]);
+    }
+
     m_Parser.Clear();
+
+    if (filename)
+      m_Parser.Filename(*filename);
+    else
+      m_Parser.Filename(fs::path{});
+
+
     if (not m_Parser.LoadFromStr(ini))
       return false;
 
@@ -1345,6 +1436,8 @@ namespace llarp
       }
     });
 
+    LoadOverrides(conf);
+
     conf.process();
 
     return true;
@@ -1353,39 +1446,24 @@ namespace llarp
   bool
   Config::Load(std::optional<fs::path> fname, bool isRelay)
   {
-    if (not fname.has_value())
-      return LoadDefault(isRelay);
-    try
+    std::vector<char> ini{};
+    if (fname)
     {
-      auto params = MakeGenParams();
-      params->isRelay = isRelay;
-      params->defaultDataDir = m_DataDir;
-
-      ConfigDefinition conf{isRelay};
-      initializeConfig(conf, *params);
-      m_Parser.Clear();
-      if (!m_Parser.LoadFile(*fname))
-      {
+      if (not fs::exists(*fname))
         return false;
-      }
-      LoadOverrides();
-
-      m_Parser.IterAll([&](std::string_view section, const SectionValues_t& values) {
-        for (const auto& pair : values)
-        {
-          conf.addConfigValue(section, pair.first, pair.second);
-        }
-      });
-
-      conf.process();
-
-      return true;
+      fs::ifstream inf{*fname, std::ios::in | std::ios::binary};
+      auto sz = inf.seekg(0, std::ios::end).tellg();
+      inf.seekg(0, std::ios::beg);
+      ini.resize(sz);
+      inf.read(ini.data(), ini.size());
     }
-    catch (const std::exception& e)
-    {
-      LogError("Error trying to init and parse config from file: ", e.what());
-      return false;
-    }
+    return LoadConfigData(std::string_view{ini.data(), ini.size()}, fname, isRelay);
+  }
+
+  bool
+  Config::LoadString(std::string_view ini, bool isRelay)
+  {
+    return LoadConfigData(ini, std::nullopt, isRelay);
   }
 
   bool

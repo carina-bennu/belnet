@@ -4,152 +4,600 @@
 #include <array>
 #include <utility>
 #include <llarp/ev/udp_handle.hpp>
+#include <optional>
+#include <memory>
+#include <unbound.h>
+#include <uvw.hpp>
+
+#include "sd_platform.hpp"
+#include "nm_platform.hpp"
+#include "win32_platform.hpp"
 
 namespace llarp::dns
 {
-  PacketHandler::PacketHandler(EventLoop_ptr loop, IQueryHandler* h)
-      : m_QueryHandler{h}, m_Loop{std::move(loop)}
+  void
+  QueryJob_Base::Cancel() const
+  {
+    Message reply{m_Query};
+    reply.AddServFail();
+    SendReply(reply.ToBuffer());
+  }
+
+  /// sucks up udp packets from a bound socket and feeds it to a server
+  class UDPReader : public PacketSource_Base, public std::enable_shared_from_this<UDPReader>
+  {
+    Server& m_DNS;
+    std::shared_ptr<llarp::UDPHandle> m_udp;
+    SockAddr m_LocalAddr;
+
+  public:
+    explicit UDPReader(Server& dns, const EventLoop_ptr& loop, llarp::SockAddr bindaddr)
+        : m_DNS{dns}
+    {
+      m_udp = loop->make_udp([&](auto&, SockAddr src, llarp::OwnedBuffer buf) {
+        if (src == m_LocalAddr)
+          return;
+        if (not m_DNS.MaybeHandlePacket(shared_from_this(), m_LocalAddr, src, std::move(buf)))
+        {
+          LogWarn("did not handle dns packet from ", src, " to ", m_LocalAddr);
+        }
+      });
+      m_udp->listen(bindaddr);
+      if (auto maybe_addr = BoundOn())
+      {
+        m_LocalAddr = *maybe_addr;
+      }
+      else
+        throw std::runtime_error{"cannot find which address our dns socket is bound on"};
+    }
+
+    std::optional<SockAddr>
+    BoundOn() const override
+    {
+      return m_udp->LocalAddr();
+    }
+
+    bool
+    WouldLoop(const SockAddr& to, const SockAddr&) const override
+    {
+      return to != m_LocalAddr;
+    }
+
+    void
+    SendTo(const SockAddr& to, const SockAddr&, llarp::OwnedBuffer buf) const override
+    {
+      m_udp->send(to, std::move(buf));
+    }
+  
+    void
+    Stop() override
+    {
+      m_udp->close();
+    }
+  };
+
+  namespace libunbound
+  {
+    class Resolver;
+
+    class Query : public QueryJob_Base
+    {
+      std::weak_ptr<Resolver> parent;
+      std::shared_ptr<PacketSource_Base> src;
+      SockAddr resolverAddr;
+      SockAddr askerAddr;
+
+     public:
+      explicit Query(
+          std::weak_ptr<Resolver> parent_,
+          Message query,
+          std::shared_ptr<PacketSource_Base> pktsrc,
+          SockAddr toaddr,
+          SockAddr fromaddr)
+          : QueryJob_Base{std::move(query)}
+          , parent{parent_}
+          , src{pktsrc}
+          , resolverAddr{std::move(toaddr)}
+          , askerAddr{std::move(fromaddr)}
+      {}
+
+      virtual void
+      SendReply(llarp::OwnedBuffer replyBuf) const override;
+    };
+
+    /// Resolver_Base that uses libunbound
+    class Resolver : public Resolver_Base, public std::enable_shared_from_this<Resolver>
+    {
+      std::shared_ptr<ub_ctx> m_ctx;
+      std::weak_ptr<EventLoop> m_Loop;
+#ifdef _WIN32
+      // windows is dumb so we do ub mainloop in a thread
+      std::thread runner;
+      std::atomic<bool> running;
+#else
+      std::shared_ptr<uvw::PollHandle> m_Poller;
+#endif
+
+      std::optional<SockAddr> m_LocalAddr;
+
+      struct ub_result_deleter
+      {
+        void
+        operator()(ub_result* ptr)
+        {
+          ::ub_resolve_free(ptr);
+        }
+      };
+
+      const net::Platform*
+      Net_ptr() const
+      {
+        return m_Loop.lock()->Net_ptr();
+      }
+
+      static void
+      Callback(void* data, int err, ub_result* _result)
+      {
+        // take ownership of ub_result
+        std::unique_ptr<ub_result, ub_result_deleter> result{_result};
+        // take ownership of our query
+        std::unique_ptr<Query> query{static_cast<Query*>(data)};
+
+        if (err)
+        {
+          // some kind of error from upstream
+          query->Cancel();
+          return;
+        }
+
+        // rewrite response
+        OwnedBuffer pkt{(const byte_t*)result->answer_packet, (size_t)result->answer_len};
+        llarp_buffer_t buf{pkt};
+        MessageHeader hdr;
+        hdr.Decode(&buf);
+        hdr.id = query->Underlying().hdr_id;
+        buf.cur = buf.base;
+        hdr.Encode(&buf);
+
+        // send reply
+        query->SendReply(std::move(pkt));
+      }
+
+      void
+      SetOpt(std::string key, std::string val)
+      {
+        ub_ctx_set_option(m_ctx.get(), key.c_str(), val.c_str());
+      }
+
+      llarp::DnsConfig m_conf;
+
+     public:
+      explicit Resolver(const EventLoop_ptr& loop, llarp::DnsConfig conf)
+          : m_ctx{::ub_ctx_create(), ::ub_ctx_delete}, m_Loop{loop}, m_conf{std::move(conf)}
+      {
+        Up(m_conf);
+      }
+
+#ifdef _WIN32
+      virtual ~Resolver()
+      {
+        running = false;
+        runner.join();
+      }
+#else
+      virtual ~Resolver() = default;
+#endif
+
+      std::string_view
+      ResolverName() const override
+      {
+        return "unbound";
+      }
+
+      virtual std::optional<SockAddr>
+      GetLocalAddr() const override
+      {
+        return m_LocalAddr;
+      }
+
+      void
+      Up(const llarp::DnsConfig& conf)
+      {
+        // set libunbound settings
+        for (const auto& [k, v] : conf.m_ExtraOpts)
+          SetOpt(k, v);
+
+        // add host files
+        for (const auto& file : conf.m_hostfiles)
+        {
+          const auto str = file.u8string();
+          if (auto ret = ub_ctx_hosts(m_ctx.get(), str.c_str()))
+          {
+            throw std::runtime_error{
+                fmt::format("Failed to add host file {}: {}", file, ub_strerror(ret))};
+          }
+        }
+
+        // set up forward dns
+        for (const auto& dns : conf.m_upstreamDNS)
+        {
+          std::stringstream ss;
+          auto hoststr = dns.hostString();
+          ss << hoststr;
+
+          if (const auto port = dns.getPort(); port != 53)
+            ss << "@" << port;
+
+          const auto str = ss.str();
+          if (auto err = ub_ctx_set_fwd(m_ctx.get(), str.c_str()))
+          {
+            throw std::runtime_error{
+                fmt::format("cannot use {} as upstream dns: {}", str, ub_strerror(err))};
+          }
+        }
+
+        if (auto maybe_addr = conf.m_QueryBind)
+        {
+          SockAddr addr{*maybe_addr};
+          std::string host{addr.hostString()};
+
+          if (addr.getPort() == 0)
+          {
+            // unbound manages their own sockets because of COURSE it does. so we find an open port
+            // on our system and use it so we KNOW what it is before giving it to unbound to
+            // explicitly bind to JUST that port.
+
+            addrinfo hints{};
+            addrinfo* result{nullptr};
+            hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+            hints.ai_socktype = SOCK_DGRAM;
+            hints.ai_family = AF_INET;
+            if (auto err = getaddrinfo(host.c_str(), nullptr, &hints, &result))
+              throw std::invalid_argument{strerror(err)};
+            addr.setPort(net::port_t{reinterpret_cast<sockaddr_in*>(result->ai_addr)->sin_port});
+            freeaddrinfo(result);
+          }
+
+          m_LocalAddr = addr;
+
+          LogInfo(fmt::format("sening dns queries from {}:{}", host, addr.getPort()));
+          // set up query bind port if needed
+          SetOpt("outgoing-interface:", host);
+          SetOpt("outgoing-range:", "1");
+          SetOpt("outgoing-port-avoid:", "0-65535");
+          SetOpt("outgoing-port-permit:", std::to_string(addr.getPort()));
+
+        }
+
+        // set async
+        ub_ctx_async(m_ctx.get(), 1);
+        // setup mainloop
+#ifdef _WIN32
+        running = true;
+        runner = std::thread{[this]() {
+          while (running)
+          {
+            if (m_ctx.get())
+              ub_wait(m_ctx.get());
+            std::this_thread::sleep_for(25ms);
+          }
+          if (m_ctx.get())
+            ub_process(m_ctx.get());
+        }};
+#else
+        if (auto loop = m_Loop.lock())
+        {
+          if (auto loop_ptr = loop->MaybeGetUVWLoop())
+          {
+            m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx.get()));
+            m_Poller->on<uvw::PollEvent>([ptr = std::weak_ptr<ub_ctx>{m_ctx}](auto&, auto&) {
+              if (auto ctx = ptr.lock())
+                ub_process(ctx.get());
+            });
+            m_Poller->start(uvw::PollHandle::Event::READABLE);
+            return;
+          }
+        }
+        throw std::runtime_error{"no uvw loop"};
+#endif
+      }
+
+      void
+      Down()
+      {
+#ifdef _WIN32
+        running = false;
+        runner.join();
+#else
+        m_Poller->close();
+        if (auto loop = m_Loop.lock())
+        {
+          if (auto loop_ptr = loop->MaybeGetUVWLoop())
+          {
+            m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx.get()));
+            m_Poller->on<uvw::PollEvent>([ptr = std::weak_ptr<ub_ctx>{m_ctx}](auto&, auto&) {
+              if (auto ctx = ptr.lock())
+                ub_process(ctx.get());
+            });
+            m_Poller->start(uvw::PollHandle::Event::READABLE);
+          }
+        }
+#endif
+        m_ctx.reset();
+      }
+
+      int
+      Rank() const override
+      {
+        return 10;
+      }
+
+      void
+      ResetInternalState() override
+      {
+        Down();
+        Up(m_conf);
+      }
+
+      void
+      CancelPendingQueries() override
+      {
+        Down();
+      }
+
+      bool
+      WouldLoop(const SockAddr& to, const SockAddr& from) const override
+      {
+#if defined(ANDROID)
+        (void)to;
+        (void)from;
+        return false;
+#else
+        const auto& vec = m_conf.m_upstreamDNS;
+        return std::find(vec.begin(), vec.end(), to) != std::end(vec)
+            or std::find(vec.begin(), vec.end(), from) != std::end(vec);
+#endif
+      }
+
+      template <typename Callable>
+      void
+      call(Callable&& f)
+      {
+        if (auto loop = m_Loop.lock())
+          loop->call(std::forward<Callable>(f));
+        else
+          LogError("no mainloop?");
+      }
+
+      bool
+      MaybeHookDNS(
+          std::shared_ptr<PacketSource_Base> source,
+          const Message& query,
+          const SockAddr& to,
+          const SockAddr& from) override
+      {
+        if (WouldLoop(to, from))
+          return false;
+        // we use this unique ptr to clean up on fail
+        auto tmp = std::make_unique<Query>(weak_from_this(), query, source, to, from);
+        // no questions, send fail
+        if (query.questions.empty())
+        {
+          tmp->Cancel();
+          return true;
+        }
+
+        for (const auto& q : query.questions)
+        {
+          // dont process .bdx or .mnode
+          if (q.HasTLD(".bdx") or q.HasTLD(".mnode"))
+          {
+            tmp->Cancel();
+            return true;
+          }
+        }
+        // leak bare pointer and try to do the request
+        auto* pending = tmp.release();
+        const auto& q = query.questions[0];
+        if (auto err = ub_resolve_async(
+                m_ctx.get(),
+                q.Name().c_str(),
+                q.qtype,
+                q.qclass,
+                (void*)pending,
+                &Resolver::Callback,
+                nullptr))
+        {
+          // take back ownership on fail
+          LogWarn("failed to send upstream query with libunbound: ", ub_strerror(err));
+          tmp.reset(pending);
+          tmp->Cancel();
+        }
+        return true;
+      }
+      };
+
+    void
+    Query::SendReply(llarp::OwnedBuffer replyBuf) const
+    {
+      if (auto ptr = parent.lock())
+      {
+        ptr->call([this, from = resolverAddr, to = askerAddr, buf = replyBuf.copy()] {
+          src->SendTo(to, from, OwnedBuffer::copy_from(buf));
+        });
+      }
+      else
+        LogError("no source or parent");
+    }
+  }  // namespace libunbound
+
+  Server::Server(EventLoop_ptr loop, llarp::DnsConfig conf, unsigned int netif)
+      : m_Loop{std::move(loop)}
+      , m_Config{std::move(conf)}
+      , m_Platform{CreatePlatform()}
+      , m_NetIfIndex{std::move(netif)}
   {}
 
-  Proxy::Proxy(EventLoop_ptr loop, IQueryHandler* h)
-      : PacketHandler{loop, h}, m_Loop(std::move(loop))
+  std::vector<std::weak_ptr<Resolver_Base>>
+  Server::GetAllResolvers() const
   {
-    m_Server = m_Loop->make_udp(
-        [this](UDPHandle&, SockAddr a, OwnedBuffer buf) { HandlePacket(a, a, buf); });
+    std::vector<std::weak_ptr<Resolver_Base>> all;
+    for (const auto& res : m_Resolvers)
+      all.push_back(res);
+    return all;
   }
 
   void
-  PacketHandler::Stop()
+  Server::Start()
   {
-    if (m_UnboundResolver)
-      m_UnboundResolver->Stop();
-  }
-
-  bool
-  Proxy::Start(SockAddr addr, std::vector<SockAddr> resolvers, std::vector<fs::path> hostfiles)
-  {
-    if (not PacketHandler::Start(addr, std::move(resolvers), std::move(hostfiles)))
-      return false;
-    return m_Server->listen(addr);
-  }
-
-  void
-  PacketHandler::Restart()
-  {
-    if (m_UnboundResolver)
+    // set up udp sockets
+    for (const auto& addr : m_Config.m_bind)
     {
-      LogInfo("reset libunbound's internal stuff");
-      m_UnboundResolver->Init();
-    }
-  }
-
-  bool
-  PacketHandler::Start(SockAddr, std::vector<SockAddr> resolvers, std::vector<fs::path> hostfiles)
-  {
-    return SetupUnboundResolver(std::move(resolvers), std::move(hostfiles));
-  }
-
-  bool
-  PacketHandler::SetupUnboundResolver(
-      std::vector<SockAddr> resolvers, std::vector<fs::path> hostfiles)
-  {
-    // if we have no resolvers don't set up unbound
-    if (resolvers.empty())
-      return true;
-
-    auto failFunc = [self = weak_from_this()](
-                        const SockAddr& to, const SockAddr& from, Message msg) {
-      if (auto this_ptr = self.lock())
-        this_ptr->SendServerMessageBufferTo(to, from, msg.ToBuffer());
-    };
-
-    auto replyFunc = [self = weak_from_this()](auto&&... args) {
-      if (auto this_ptr = self.lock())
-        this_ptr->SendServerMessageBufferTo(std::forward<decltype(args)>(args)...);
-    };
-
-    m_UnboundResolver =
-        std::make_shared<UnboundResolver>(m_Loop, std::move(replyFunc), std::move(failFunc));
-    m_Resolvers.clear();
-    if (not m_UnboundResolver->Init())
-    {
-      llarp::LogError("Failed to initialize upstream DNS resolver.");
-      m_UnboundResolver = nullptr;
-      return false;
-    }
-    for (const auto& resolver : resolvers)
-    {
-      if (not m_UnboundResolver->AddUpstreamResolver(resolver))
-      {
-        llarp::LogError("Failed to add upstream DNS server: ", resolver);
-        m_UnboundResolver = nullptr;
-        return false;
-      }
-      m_Resolvers.emplace(resolver);
-    }
-    for (const auto& path : hostfiles)
-    {
-      m_UnboundResolver->AddHostsFile(path);
+      if (auto ptr = MakePacketSourceOn(addr, m_Config))
+        AddPacketSource(std::move(ptr));
     }
 
-    return true;
+    // add default resolver as needed
+    if (auto ptr = MakeDefaultResolver())
+      AddResolver(ptr);
   }
 
-  void
-  Proxy::SendServerMessageBufferTo(
-      const SockAddr& to, [[maybe_unused]] const SockAddr& from, llarp_buffer_t buf)
+  std::shared_ptr<I_Platform>
+  Server::CreatePlatform() const
   {
-    if (!m_Server->send(to, buf))
-      llarp::LogError("dns reply failed");
-  }
-
-  bool
-  PacketHandler::IsUpstreamResolver(const SockAddr& to, [[maybe_unused]] const SockAddr& from) const
-  {
-    return m_Resolvers.count(to);
-  }
-
-  bool
-  PacketHandler::ShouldHandlePacket(
-      const SockAddr& to, const SockAddr& from, llarp_buffer_t buf) const
-  {
-    MessageHeader hdr;
-    if (not hdr.Decode(&buf))
+    auto plat = std::make_shared<Multi_Platform>();
+    if constexpr (llarp::platform::has_systemd)
     {
-      return false;
+      plat->add_impl(std::make_unique<SD_Platform_t>());
+      plat->add_impl(std::make_unique<NM_Platform_t>());
+    }
+    if constexpr (llarp::platform::is_windows)
+    {
+      plat->add_impl(std::make_unique<Win32_Platform_t>());
+    }
+    return plat;
+  }
+
+  std::shared_ptr<PacketSource_Base>
+  Server::MakePacketSourceOn(const llarp::SockAddr& addr, const llarp::DnsConfig&)
+  {
+    return std::make_shared<UDPReader>(*this, m_Loop, addr);
+  }
+
+  std::shared_ptr<Resolver_Base>
+  Server::MakeDefaultResolver()
+  {
+    if (m_Config.m_upstreamDNS.empty())
+    {
+      LogInfo(
+          "explicitly no upstream dns providers specified, we will not resolve anything but .bdx "
+          "and .mnode");
+      return nullptr;
     }
 
-    Message msg{hdr};
-    if (not msg.Decode(&buf))
-    {
-      return false;
-    }
+    return std::make_shared<libunbound::Resolver>(m_Loop, m_Config);
+  }
 
-    if (m_QueryHandler and m_QueryHandler->ShouldHookDNSMessage(msg))
-      return true;
-    // If this request is going to an upstream resolver then we want to let it through (i.e. don't
-    // handle it), and so want to return false.  If we have something else then we want to
-    // intercept it to route it through our caching libunbound server (which then redirects the
-    // request to the belnet-configured upstream, if not cached).
-    return !IsUpstreamResolver(to, from);
+  std::vector<SockAddr>
+  Server::BoundPacketSourceAddrs() const
+  {
+    std::vector<SockAddr> addrs;
+    for (const auto& src : m_PacketSources)
+    {
+      if (auto ptr = src.lock())
+        if (auto maybe_addr = ptr->BoundOn())
+          addrs.emplace_back(*maybe_addr);
+    }
+    return addrs;
+  }
+
+  std::optional<SockAddr>
+  Server::FirstBoundPacketSourceAddr() const
+  {
+    for (const auto& src : m_PacketSources)
+    {
+      if (auto ptr = src.lock())
+        if (auto bound = ptr->BoundOn())
+          return bound;
+    }
+    return std::nullopt;
   }
 
   void
-  PacketHandler::HandlePacket(const SockAddr& resolver, const SockAddr& from, llarp_buffer_t buf)
+  Server::AddResolver(std::weak_ptr<Resolver_Base> resolver)
   {
-    MessageHeader hdr;
-    if (not hdr.Decode(&buf))
+    m_Resolvers.insert(resolver);
+  }
+
+  void
+  Server::AddResolver(std::shared_ptr<Resolver_Base> resolver)
+  {
+    m_OwnedResolvers.insert(resolver);
+    AddResolver(std::weak_ptr<Resolver_Base>{resolver});
+  }
+
+  void
+  Server::AddPacketSource(std::weak_ptr<PacketSource_Base> pkt)
+  {
+    m_PacketSources.push_back(pkt);
+  }
+
+  void
+  Server::AddPacketSource(std::shared_ptr<PacketSource_Base> pkt)
+  {
+    m_OwnedPacketSources.push_back(pkt);
+    AddPacketSource(std::weak_ptr<PacketSource_Base>{pkt});
+  }
+
+  void
+  Server::Stop()
+  {
+    for (const auto& resolver : m_Resolvers)
     {
-      llarp::LogWarn("failed to parse dns header from ", from);
-      return;
+      if (auto ptr = resolver.lock())
+        ptr->CancelPendingQueries();
+    }
+  }
+
+  void
+  Server::Reset()
+  {
+    for (const auto& resolver : m_Resolvers)
+    {
+      if (auto ptr = resolver.lock())
+        ptr->ResetInternalState();
+    }
+  }
+
+  void
+  Server::SetDNSMode(bool all_queries)
+  {
+    if (auto maybe_addr = FirstBoundPacketSourceAddr())
+      m_Platform->set_resolver(m_NetIfIndex, *maybe_addr, all_queries);
+  }
+
+  bool
+  Server::MaybeHandlePacket(
+      std::shared_ptr<PacketSource_Base> ptr,
+      const SockAddr& to,
+      const SockAddr& from,
+      llarp::OwnedBuffer buf)
+  {
+    // dont process to prevent feedback loop
+    if (ptr->WouldLoop(to, from))
+    {
+      LogWarn("preventing dns packet replay to=", to, " from=", from);
+      return false;
     }
 
-    Message msg(hdr);
-    if (not msg.Decode(&buf))
+    auto maybe = MaybeParseDNSMessage(buf);
+    if (not maybe)
     {
-      llarp::LogWarn("failed to parse dns message from ", from);
-      return;
+      LogWarn("invalid dns message format from ", from, " to dns listener on ", to);
+      return false;
     }
+
+    auto& msg = *maybe;
 
     // we don't provide a DoH resolver because it requires verified TLS
     // TLS needs X509/ASN.1-DER and opting into the Root CA Cabal
@@ -162,32 +610,22 @@ namespace llarp::dns
       {
         // yea it is, let's turn off DoH because god is dead.
         msg.AddNXReply();
-        // press F to pay respects
-        SendServerMessageBufferTo(from, resolver, msg.ToBuffer());
-        return;
+        // press F to pay respects and send it back where it came from
+        ptr->SendTo(from, to, msg.ToBuffer());
+        return true;
       }
     }
 
-    if (m_QueryHandler && m_QueryHandler->ShouldHookDNSMessage(msg))
+    for (const auto& resolver : m_Resolvers)
     {
-      auto reply = [self = shared_from_this(), to = from, resolver](dns::Message msg) {
-        self->SendServerMessageBufferTo(to, resolver, msg.ToBuffer());
-      };
-      if (!m_QueryHandler->HandleHookedDNSMessage(std::move(msg), reply))
+      if (auto res_ptr = resolver.lock())
       {
-        llarp::LogWarn("failed to handle hooked dns");
+        LogDebug("check resolver ", res_ptr->ResolverName(), " for dns from ", from, " to ", to);
+        if (res_ptr->MaybeHookDNS(ptr, msg, to, from))
+          return true;
       }
     }
-    else if (not m_UnboundResolver)
-    {
-      // no upstream resolvers
-      // let's serv fail it
-      msg.AddServFail();
-      SendServerMessageBufferTo(from, resolver, msg.ToBuffer());
-    }
-    else
-    {
-      m_UnboundResolver->Lookup(resolver, from, std::move(msg));
-    }
+    return false;
   }
+
 }  // namespace llarp::dns

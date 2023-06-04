@@ -2,11 +2,10 @@
 #include "tunnel.hpp"
 #include <llarp/util/logging/buffer.hpp>
 #include <llarp/util/logging.hpp>
-
 #include <oxenc/variant.h>
 #include <llarp/service/address.hpp>
 #include <llarp/service/endpoint.hpp>
-#include <llarp/ev/ev_libuv.hpp>
+#include <llarp/ev/libuv.hpp>
 
 #include <variant>
 

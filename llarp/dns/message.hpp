@@ -105,6 +105,9 @@ namespace llarp
       std::vector<ResourceRecord> additional;
     };
 
+    std::optional<Message>
+    MaybeParseDNSMessage(llarp_buffer_t buf);
+
   }  // namespace dns
 
   template <>
