@@ -4,17 +4,6 @@
 #include <cstdarg>
 #include <cstdio>
 
-size_t
-llarp_buffer_t::size_left() const
-{
-  size_t diff = cur - base;
-  if (diff > sz)
-  {
-    return 0;
-  }
-
-  return sz - diff;
-}
 
 bool
 llarp_buffer_t::writef(const char* fmt, ...)
@@ -125,12 +114,6 @@ llarp_buffer_t::copy() const
   std::copy_n(base, sz, copy.data());
 
   return copy;
-}
-
-llarp::byte_view_t
-llarp_buffer_t::view() const
-{
-  return {base, sz};
 }
 
 namespace llarp
