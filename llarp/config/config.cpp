@@ -785,15 +785,16 @@ namespace llarp
     // Most non-linux platforms have loopback as 127.0.0.1/32, but linux uses 127.0.0.1/8 so that we
     // can bind to other 127.* IPs to avoid conflicting with something else that may be listening on
     // 127.0.0.1:53.
+    constexpr std::array DefaultDNSBind{
 #ifdef __linux__
 #ifdef WITH_SYSTEMD
-    constexpr Default DefaultDNSBind{"127.0.0.1:0"};
-#else
-    constexpr Default DefaultDNSBind{"127.3.2.1:53"};
+      Default{"127.0.0.1:0"},
 #endif
+      Default{"127.3.2.1:53"},
 #else
-    constexpr Default DefaultDNSBind{"127.0.0.1:53"};
+      Default{"127.0.0.1:53"},
 #endif
+      };
 
     // Default, but if we get any upstream (including upstream=, i.e. empty string) we clear it
     constexpr Default DefaultUpstreamDNS{"9.9.9.10:53"};
@@ -836,9 +837,10 @@ namespace llarp
         "query-bind",
 #ifdef __APPLE__
         Default{"127.0.0.1:1253"},
-#endif
-#ifdef _WIN32
+#elif defined(_WIN32)
         Default{"0.0.0.0:0"},
+#else
+        Hidden,
 #endif
         Comment{
             "Address to bind to for sending upstream DNS requests.",
@@ -851,6 +853,7 @@ namespace llarp
         "dns",
         "bind",
         DefaultDNSBind,
+        MultiValue,
         Comment{
             "Address to bind to for handling DNS requests.",
         },
