@@ -10,6 +10,7 @@
 
 namespace llarp::net
 {
+#pragma pack(push, 1)
   template <bool is_little_endian>
   struct ip_header_le
   {
@@ -25,6 +26,7 @@ namespace llarp::net
     uint32_t saddr;
     uint32_t daddr;
   };
+#pragma pack(pop)
 
   template <>
   struct ip_header_le<false>
