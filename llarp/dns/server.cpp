@@ -2,6 +2,7 @@
 #include "dns.hpp"
 #include <llarp/crypto/crypto.hpp>
 #include <array>
+#include <stdexcept>
 #include <utility>
 #include <llarp/ev/udp_handle.hpp>
 #include <optional>
@@ -9,12 +10,15 @@
 #include <unbound.h>
 #include <uvw.hpp>
 
+#include "oxen/log.hpp"
 #include "sd_platform.hpp"
 #include "nm_platform.hpp"
 #include "win32_platform.hpp"
 
 namespace llarp::dns
 {
+  static auto logcat = log::Cat("dns");
+
   void
   QueryJob_Base::Cancel() const
   {
@@ -39,7 +43,7 @@ namespace llarp::dns
           return;
         if (not m_DNS.MaybeHandlePacket(shared_from_this(), m_LocalAddr, src, std::move(buf)))
         {
-          LogWarn("did not handle dns packet from ", src, " to ", m_LocalAddr);
+          log::warning(logcat, "did not handle dns packet from {} to {}", src, m_LocalAddr);
         }
       });
       m_udp->listen(bindaddr);
@@ -247,20 +251,32 @@ namespace llarp::dns
             // on our system and use it so we KNOW what it is before giving it to unbound to
             // explicitly bind to JUST that port.
 
-            addrinfo hints{};
-            addrinfo* result{nullptr};
-            hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-            hints.ai_socktype = SOCK_DGRAM;
-            hints.ai_family = AF_INET;
-            if (auto err = getaddrinfo(host.c_str(), nullptr, &hints, &result))
-              throw std::invalid_argument{strerror(err)};
-            addr.setPort(net::port_t{reinterpret_cast<sockaddr_in*>(result->ai_addr)->sin_port});
-            freeaddrinfo(result);
+            int fd = socket(AF_INET, SOCK_DGRAM, 0);
+            if (fd == -1)
+              throw std::invalid_argument{
+                  fmt::format("Failed to create UDP socket for unbound: {}", strerror(errno))};
+            if (0 != bind(fd, static_cast<const sockaddr*>(addr), addr.sockaddr_len()))
+            {
+              close(fd);
+              throw std::invalid_argument{
+                  fmt::format("Failed to bind UDP socket for unbound: {}", strerror(errno))};
+            }
+            struct sockaddr_storage sas;
+            auto* sa = reinterpret_cast<struct sockaddr*>(&sas);
+            socklen_t sa_len;
+            if (0 != getsockname(fd, sa, &sa_len))
+            {
+              close(fd);
+              throw std::invalid_argument{
+                  fmt::format("Failed to query UDP port for unbound: {}", strerror(errno))};
+            }
+            addr = SockAddr{*sa};
+            close(fd);
           }
 
           m_LocalAddr = addr;
 
-          LogInfo(fmt::format("sening dns queries from {}:{}", host, addr.getPort()));
+          log::info(logcat, "sending dns queries from {}:{}", host, addr.getPort());
           // set up query bind port if needed
           SetOpt("outgoing-interface:", host);
           SetOpt("outgoing-range:", "1");
@@ -366,7 +382,7 @@ namespace llarp::dns
         if (auto loop = m_Loop.lock())
           loop->call(std::forward<Callable>(f));
         else
-          LogError("no mainloop?");
+          log::critical(logcat, "no mainloop?");
       }
 
       bool
@@ -409,7 +425,8 @@ namespace llarp::dns
                 nullptr))
         {
           // take back ownership on fail
-          LogWarn("failed to send upstream query with libunbound: ", ub_strerror(err));
+          log::warning(
+              logcat, "failed to send upstream query with libunbound: {}", ub_strerror(err));
           tmp.reset(pending);
           tmp->Cancel();
         }
@@ -427,7 +444,7 @@ namespace llarp::dns
         });
       }
       else
-        LogError("no source or parent");
+        log::error(logcat, "no source or parent");
     }
   }  // namespace libunbound
 
@@ -489,7 +506,8 @@ namespace llarp::dns
   {
     if (m_Config.m_upstreamDNS.empty())
     {
-      LogInfo(
+      log::info(
+          logcat,
           "explicitly no upstream dns providers specified, we will not resolve anything but .bdx "
           "and .mnode");
       return nullptr;
@@ -586,14 +604,14 @@ namespace llarp::dns
     // dont process to prevent feedback loop
     if (ptr->WouldLoop(to, from))
     {
-      LogWarn("preventing dns packet replay to=", to, " from=", from);
+      log::warning(logcat, "preventing dns packet replay to={} from={}", to, from);
       return false;
     }
 
     auto maybe = MaybeParseDNSMessage(buf);
     if (not maybe)
     {
-      LogWarn("invalid dns message format from ", from, " to dns listener on ", to);
+      log::warning(logcat, "invalid dns message format from {} to dns listener on {}", from, to);
       return false;
     }
 
@@ -620,7 +638,8 @@ namespace llarp::dns
     {
       if (auto res_ptr = resolver.lock())
       {
-        LogDebug("check resolver ", res_ptr->ResolverName(), " for dns from ", from, " to ", to);
+        log::debug(
+            logcat, "check resolver {} for dns from {} to {}", res_ptr->ResolverName(), from, to);
         if (res_ptr->MaybeHookDNS(ptr, msg, to, from))
           return true;
       }
