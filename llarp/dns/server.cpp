@@ -171,62 +171,38 @@ namespace llarp::dns
         query->SendReply(std::move(pkt));
       }
 
-      void
-      SetOpt(std::string key, std::string val)
+      void ConfigureUpstream(const llarp::DnsConfig& conf)
       {
-        ub_ctx_set_option(m_ctx.get(), key.c_str(), val.c_str());
-      }
+        auto* ctx = m_ctx.get();
 
-      llarp::DnsConfig m_conf;
-
-     public:
-      explicit Resolver(const EventLoop_ptr& loop, llarp::DnsConfig conf)
-          : m_ctx{::ub_ctx_create(), ::ub_ctx_delete}, m_Loop{loop}, m_conf{std::move(conf)}
-      {
-        Up(m_conf);
-      }
-
-#ifdef _WIN32
-      virtual ~Resolver()
-      {
-        running = false;
-        runner.join();
-      }
-#else
-      virtual ~Resolver() = default;
-#endif
-
-      std::string_view
-      ResolverName() const override
-      {
-        return "unbound";
-      }
-
-      virtual std::optional<SockAddr>
-      GetLocalAddr() const override
-      {
-        return m_LocalAddr;
-      }
-
-      void
-      Up(const llarp::DnsConfig& conf)
-      {
-        // set libunbound settings
-
-        SetOpt("do-tcp:", "no");
-
-        for (const auto& [k, v] : conf.m_ExtraOpts)
-          SetOpt(k, v);
-
-        // add host files
-        for (const auto& file : conf.m_hostfiles)
+        if constexpr (platform::is_apple)
         {
-          const auto str = file.u8string();
-          if (auto ret = ub_ctx_hosts(m_ctx.get(), str.c_str()))
-          {
-            throw std::runtime_error{
-                fmt::format("Failed to add host file {}: {}", file, ub_strerror(ret))};
-          }
+          // On Apple, when we turn on exit mode, we can't directly connect to upstream from here
+          // because, from within the network extension, macOS ignores setting the tunnel as the
+          // default route and would leak all DNS; instead we have to bounce things through the
+          // objective C trampoline code (which is what actually handles the upstream querying) so
+          // that it can call into Apple's special snowflake API to set up a socket that has the
+          // magic Apple snowflake sauce added on top so that it actually routes through the tunnel
+          // instead of around it.
+          //
+          // This behaviour is all carefully and explicitly documented by Apple with plenty of
+          // examples and other exposition, of course, just like all of their wonderful new APIs to
+          // reinvent standard unix interfaces.
+
+          // Not at all clear why this is needed but without it we get "send failed: Can't
+          // assign requested address" when unbound tries to connect to the localhost address
+          // using a source address of 0.0.0.0.  Yay apple.
+          ub_ctx_set_option(ctx, "outgoing-interface:", "127.0.0.1");
+
+          // The trampoline expects just a single source port (and sends everything back to it)
+          ub_ctx_set_option(ctx, "outgoing-range:", "1");
+          ub_ctx_set_option(ctx, "outgoing-port-avoid:", "0-65535");
+          ub_ctx_set_option(
+              ctx,
+              "outgoing-port-permit:",
+              std::to_string(apple::dns_trampoline_source_port).c_str());
+
+          return;
         }
 
         // set up forward dns
@@ -237,42 +213,12 @@ namespace llarp::dns
           if (const auto port = dns.getPort(); port != 53)
             fmt::format_to(std::back_inserter(str), "@{}", port);
 
-          log::info(logcat, "Using upstream dns {}", str);
+          log::critical(logcat, "Using upstream dns {}", str);
 
-          auto* ctx = m_ctx.get();
           if (auto err = ub_ctx_set_fwd(ctx, str.c_str()))
           {
             throw std::runtime_error{
                 fmt::format("cannot use {} as upstream dns: {}", str, ub_strerror(err))};
-          }
-
-          if constexpr (platform::is_apple)
-          {
-            // On Apple, when we turn on exit mode, we can't directly connect to upstream from here
-            // because, from within the network extension, macOS ignores setting the tunnel as the
-            // default route and would leak all DNS; instead we have to bounce things through the
-            // objective C trampoline code so that it can call into Apple's special snowflake API to
-            // set up a socket that has the magic Apple snowflake sauce added on top so that it
-            // actually routes through the tunnel instead of around it.
-            //
-            // This behaviour is all carefully and explicitly documented by Apple with plenty of
-            // examples and other exposition, of course, just like all of their wonderful new APIs
-            // to reinvent standard unix interfaces.
-            if (dns.hostString() == "127.0.0.1" && dns.getPort() == apple::dns_trampoline_port)
-            {
-              // Not at all clear why this is needed but without it we get "send failed: Can't
-              // assign requested address" when unbound tries to connect to the localhost address
-              // using a source address of 0.0.0.0.  Yay apple.
-              ub_ctx_set_option(ctx, "outgoing-interface:", "127.0.0.1");
-
-              // The trampoline expects just a single source port (and sends everything back to it)
-              ub_ctx_set_option(ctx, "outgoing-range:", "1");
-              ub_ctx_set_option(ctx, "outgoing-port-avoid:", "0-65535");
-              ub_ctx_set_option(
-                  ctx,
-                  "outgoing-port-permit:",
-                  std::to_string(apple::dns_trampoline_source_port).c_str());
-            }
           }
         }
 
@@ -333,6 +279,67 @@ namespace llarp::dns
           SetOpt("outgoing-port-permit:", std::to_string(addr.getPort()));
 
         }
+      }
+
+      void
+      SetOpt(std::string key, std::string val)
+      {
+        ub_ctx_set_option(m_ctx.get(), key.c_str(), val.c_str());
+      }
+
+      llarp::DnsConfig m_conf;
+
+     public:
+      explicit Resolver(const EventLoop_ptr& loop, llarp::DnsConfig conf)
+          : m_ctx{::ub_ctx_create(), ::ub_ctx_delete}, m_Loop{loop}, m_conf{std::move(conf)}
+      {
+        Up(m_conf);
+      }
+
+#ifdef _WIN32
+      virtual ~Resolver()
+      {
+        running = false;
+        runner.join();
+      }
+#else
+      virtual ~Resolver() = default;
+#endif
+
+      std::string_view
+      ResolverName() const override
+      {
+        return "unbound";
+      }
+
+      virtual std::optional<SockAddr>
+      GetLocalAddr() const override
+      {
+        return m_LocalAddr;
+      }
+
+      void
+      Up(const llarp::DnsConfig& conf)
+      {
+        // set libunbound settings
+
+        SetOpt("do-tcp:", "no");
+
+        for (const auto& [k, v] : conf.m_ExtraOpts)
+          SetOpt(k, v);
+
+        // add host files
+        for (const auto& file : conf.m_hostfiles)
+        {
+          const auto str = file.u8string();
+          if (auto ret = ub_ctx_hosts(m_ctx.get(), str.c_str()))
+          {
+            throw std::runtime_error{
+                fmt::format("Failed to add host file {}: {}", file, ub_strerror(ret))};
+          }
+        }
+
+        ConfigureUpstream(conf);
 
         // set async
         ub_ctx_async(m_ctx.get(), 1);
@@ -386,9 +393,11 @@ namespace llarp::dns
       }
 
       void
-      ResetInternalState() override
+      ResetInternalState(std::optional<std::vector<SockAddr>> replace_upstream) override
       {
         Down();
+        if (replace_upstream)
+          m_conf.m_upstreamDNS = *replace_upstream;
         Up(m_conf);
       }
 
