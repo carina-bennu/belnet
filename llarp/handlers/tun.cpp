@@ -905,7 +905,8 @@ namespace llarp
       return true;
     }
 
-    void TunEndpoint::ResetInternalState()
+    void
+    TunEndpoint::ResetInternalState()
     {
       service::Endpoint::ResetInternalState();
     }

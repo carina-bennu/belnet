@@ -214,9 +214,9 @@ namespace llarp::dns
         {
           if (dns.hostString() == "127.0.0.1" and dns.getPort() == apple::dns_trampoline_port)
           {
-            // macOS is stupid: the default (0.0.0.0) fails with "send failed: Can't assign requested
-            // address" when unbound tries to connect to the localhost address using a source address
-            // of 0.0.0.0.  Yay apple.
+            // macOS is stupid: the default (0.0.0.0) fails with "send failed: Can't assign
+            // requested address" when unbound tries to connect to the localhost address using a
+            // source address of 0.0.0.0.  
             SetOpt("outgoing-interface:", "127.0.0.1");
 
             // The trampoline expects just a single source port (and sends everything back to it).
@@ -379,11 +379,10 @@ namespace llarp::dns
         runner = std::thread{[this]() {
           while (running)
           {
-            ub_wait(ctx);
+            ub_wait(m_ctx);
             std::this_thread::sleep_for(10ms);
           }
-          if (auto c = ctx.lock())
-            ub_process(c.get());
+          ub_process(m_ctx);
         }};
 #else
         if (auto loop = m_Loop.lock())
@@ -391,9 +390,7 @@ namespace llarp::dns
           if (auto loop_ptr = loop->MaybeGetUVWLoop())
           {
             m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx));
-            m_Poller->on<uvw::PollEvent>([this](auto&, auto&) {
-              ub_process(m_ctx);
-            });
+            m_Poller->on<uvw::PollEvent>([this](auto&, auto&) { ub_process(m_ctx); });
             m_Poller->start(uvw::PollHandle::Event::READABLE);
             return;
           }
@@ -412,7 +409,8 @@ namespace llarp::dns
         if (m_Poller)
           m_Poller->close();
 #endif
-        if (m_ctx) {
+        if (m_ctx)
+        {
           ::ub_ctx_delete(m_ctx);
           m_ctx = nullptr;
         }
