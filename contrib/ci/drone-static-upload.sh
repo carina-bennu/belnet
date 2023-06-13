@@ -51,8 +51,9 @@ elif [ -e build-docs ]; then
     cp -av build-docs/docs/mkdocs.yml build-docs/docs/markdown "$base"
     tar cJvf "$archive" "$base"
 elif [ -e build-mac ]; then
-    archive="$base.dmg"
-    mv build-mac/Belnet*.dmg "$archive"
+    archive="$base.tar.xz"
+    mv build-mac/Belnet*/ "$base"
+    tar cJvf "$archive" "$base"
 else
     cp -av daemon/belnet daemon/belnet-vpn "$base"
     cp -av ../contrib/bootstrap/mainnet.signed "$base/bootstrap.signed"
