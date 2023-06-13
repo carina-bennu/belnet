@@ -24,9 +24,6 @@ namespace llarp
         return "mnode";
       }
 
-      void
-      CancelPendingQueries() override{};
-
       bool
       MaybeHookDNS(
           std::shared_ptr<dns::PacketSource_Base> source,
