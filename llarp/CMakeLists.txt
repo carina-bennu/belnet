@@ -5,7 +5,7 @@ add_library(belnet-util
   ${CMAKE_CURRENT_BINARY_DIR}/constants/version.cpp
   util/bencode.cpp
   util/buffer.cpp
-  util/fs.cpp
+  util/file.cpp
   util/json.cpp
   util/logging/buffer.cpp
   util/easter_eggs.cpp
