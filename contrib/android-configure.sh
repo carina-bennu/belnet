@@ -1,16 +1,21 @@
 #!/bin/bash
 set -e
+
 default_abis="armeabi-v7a arm64-v8a x86_64"
 build_abis=${ABIS:-$default_abis}
+
 test x$NDK = x && test -e /usr/lib/android-ndk && export NDK=/usr/lib/android-ndk
 test x$NDK = x && exit 1
+
 echo "building abis: $build_abis"
+
 root=$(readlink -f "$1")
 shift
 build=$(readlink -f "$1")
 shift
 mkdir -p $build
 cd $build
+
 for abi in $build_abis; do
     mkdir -p build-$abi
     cd build-$abi
@@ -57,6 +62,7 @@ for abi in $build_abis; do
     echo -ne '$(MAKE) -C ' >> $build/Makefile
     echo "build-$abi clean" >> $build/Makefile
 done
+
 echo -ne "clean:" >> $build/Makefile
 for targ in $build_abis ; do echo -ne " clean-$targ" >> $build/Makefile ; done
 echo "" >> $build/Makefile
