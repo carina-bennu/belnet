@@ -1038,7 +1038,7 @@ namespace llarp
 
    if (auto dereg = LooksDeregistered(); (dereg or decom) and now >= m_NextDecommissionWarn)
     {
-      constexpr auto DecommissionWarnInterval = 30s;
+      constexpr auto DecommissionWarnInterval = 5min;
       LogError("We are running as a master node but we seem to be ", dereg ? "deregistered" : "decommissioned");
       m_NextDecommissionWarn = now + DecommissionWarnInterval;
     }

@@ -17,6 +17,7 @@ fi
 ./contrib/mac-configure.sh "$@"
 
 cd build-mac
+rm -rf Belnet\ *
 ninja -j${JOBS:-1} package
 cd ..
 

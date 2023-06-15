@@ -31,7 +31,7 @@ project(belnet
 if(APPLE)
     # Apple build number: must be incremented to submit a new build for the same belnet version,
     # should be reset to 0 when the belnet version increments.
-    set(BELNET_APPLE_BUILD 4)
+    set(BELNET_APPLE_BUILD 5)
 endif()
 
 set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
@@ -106,6 +106,8 @@ if (STATIC_LINK)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_STATIC_LIBRARY_SUFFIX})
   message(STATUS "setting static library suffix search")
 endif()
+
+include(cmake/gui-option.cmake)
 
 include(cmake/solaris.cmake)
 include(cmake/win32.cmake)
