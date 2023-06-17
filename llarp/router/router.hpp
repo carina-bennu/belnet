@@ -378,6 +378,12 @@ namespace llarp
     bool
     IsMasterNode() const override;
 
+    bool
+    IsActiveMasterNode() const override;
+
+    bool
+    ShouldPingBeldex() const override;
+
     void
     Close();
 
@@ -573,6 +579,9 @@ namespace llarp
 
     void
     MessageSent(const RouterID& remote, SendStatus status);
+
+    bool
+    TooFewPeers() const;
 
    protected:
     virtual void

@@ -234,6 +234,10 @@ add_library(belnet-amalgum
   service/tag.cpp
 )
 
+if(BOOTSTRAP_SYSTEM_PATH)
+  message(STATUS "Building with fallback boostrap path \"${BOOTSTRAP_SYSTEM_PATH}\"")
+  target_compile_definitions(belnet-amalgum PRIVATE "BOOTSTRAP_FALLBACK=\"${BOOTSTRAP_SYSTEM_PATH}\"")
+endif()
 
 if(WITH_PEERSTATS_BACKEND)
   target_compile_definitions(belnet-amalgum PRIVATE -DBELNET_PEERSTATS_BACKEND)

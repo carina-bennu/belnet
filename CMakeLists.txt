@@ -38,6 +38,12 @@ set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+set(BOOTSTRAP_SYSTEM_PATH "" CACHE PATH "Fallback bootstrap path")
+set(DEFAULT_WITH_BOOTSTRAP ON)
+if(APPLE)
+  set(DEFAULT_WITH_BOOTSTRAP OFF)
+endif()
+
 # Core options
 option(USE_AVX2 "enable avx2 code" OFF)
 option(USE_NETNS "enable networking namespace support. Linux only" OFF)
@@ -52,7 +58,7 @@ option(WARNINGS_AS_ERRORS "treat all warnings as errors. turn off for developmen
 option(WITH_TESTS "build unit tests" OFF)
 option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
-option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
+option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
 option(WITH_PEERSTATS "build with experimental peerstats db support" OFF)
 option(STRIP_SYMBOLS "strip off all debug symbols into an external archive for all executables built" OFF)
 

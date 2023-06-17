@@ -201,6 +201,15 @@ namespace llarp
     IsMasterNode() const = 0;
 
     virtual bool
+    IsActiveMasterNode() const = 0;
+
+    /// If we are running as a master node and appear active, i.e. registered and not
+    /// decommissioned, we should *not* ping core if we know of too few peers, to indicate to core
+    /// we are not in a good state.
+    virtual bool
+    ShouldPingBeldex() const = 0;
+
+    virtual bool
     StartRpcServer() = 0;
 
     virtual bool
