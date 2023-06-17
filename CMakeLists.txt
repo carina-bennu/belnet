@@ -38,7 +38,6 @@ set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
-set(BOOTSTRAP_SYSTEM_PATH "" CACHE PATH "Fallback bootstrap path")
 set(DEFAULT_WITH_BOOTSTRAP ON)
 if(APPLE)
   set(DEFAULT_WITH_BOOTSTRAP OFF)
@@ -62,6 +61,8 @@ option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
 option(WITH_PEERSTATS "build with experimental peerstats db support" OFF)
 option(STRIP_SYMBOLS "strip off all debug symbols into an external archive for all executables built" OFF)
 
+set(BOOTSTRAP_FALLBACK_MAINNET "${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed" CACHE PATH "Fallback bootstrap path (mainnet)")
+set(BOOTSTRAP_FALLBACK_TESTNET "${PROJECT_SOURCE_DIR}/contrib/bootstrap/testnet.signed" CACHE PATH "Fallback bootstrap path (testnet)")
 
 include(cmake/enable_lto.cmake)
 
