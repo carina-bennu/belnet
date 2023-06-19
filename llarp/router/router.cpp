@@ -464,16 +464,14 @@ namespace llarp
     return nodedb()->NumLoaded() < KnownPeerWarningThreshold;
   }
 
-  bool
-  Router::IsActiveMasterNode() const
+  std::optional<std::string>
+  Router::BeldexdErrorState() const
   {
-    return IsMasterNode() and not(LooksDeregistered() or LooksDecommissioned());
-  }
-
-  bool
-  Router::ShouldPingBeldex() const
-  {
-    return IsActiveMasterNode() and not TooFewPeers();
+    // If we're in the white or gray list then we *should* be establishing connections to other
+    // routers, so if we have almost no peers then something is almost certainly wrong.
+    if (LooksFunded() and TooFewPeers())
+      return "too few peer connections; belnet is not adequately connected to the network";
+    return std::nullopt;
   }
 
   void
@@ -501,10 +499,17 @@ namespace llarp
   }
 
   bool
-  Router::LooksDeregistered() const
+  Router::LooksFunded() const
   {
     return IsMasterNode() and whitelistRouters and _rcLookupHandler.HaveReceivedWhitelist()
-        and not _rcLookupHandler.SessionIsAllowed(pubkey());
+        and _rcLookupHandler.SessionIsAllowed(pubkey());
+  }
+
+  bool
+  Router::LooksRegistered() const
+  {
+    return IsMasterNode() and whitelistRouters and _rcLookupHandler.HaveReceivedWhitelist()
+        and _rcLookupHandler.IsRegistered(pubkey());
   }
 
   bool
@@ -1060,12 +1065,16 @@ namespace llarp
      if (now >= m_NextDecommissionWarn)
     {
       constexpr auto DecommissionWarnInterval = 5min;
-      if (auto dereg = LooksDeregistered(); dereg or decom)
+      if (auto registered = LooksRegistered(), funded = LooksFunded();
+          not(registered and funded and not decom))
       {
-        // complain about being deregistered
-        LogError(
-            "We are running as a master node but we seem to be ",
-            dereg ? "deregistered" : "decommissioned");
+        // complain about being deregistered/decommed/unfunded
+        log::error(
+            logcat,
+            "We are running as a master node but we seem to be {}",
+            not registered ? "deregistered"
+                : decom    ? "decommissioned"
+                           : "not fully staked");
         m_NextDecommissionWarn = now + DecommissionWarnInterval;
       }
       else if (isSvcNode and TooFewPeers())
@@ -1080,7 +1089,7 @@ namespace llarp
     
     // if we need more sessions to routers and we are not a master node kicked from the network
     // we shall connect out to others
-    if (connected < connectToNum and not LooksDeregistered())
+    if (connected < connectToNum and LooksFunded())
     {
       size_t dlt = connectToNum - connected;
       LogDebug("connecting to ", dlt, " random routers to keep alive");
@@ -1231,9 +1240,11 @@ namespace llarp
 
   void
   Router::SetRouterWhitelist(
-      const std::vector<RouterID>& whitelist, const std::vector<RouterID>& greylist)
+      const std::vector<RouterID>& whitelist,
+      const std::vector<RouterID>& greylist,
+      const std::vector<RouterID>& unfundedlist)
   {
-    _rcLookupHandler.SetRouterWhitelist(whitelist, greylist);
+    _rcLookupHandler.SetRouterWhitelist(whitelist, greylist, unfundedlist);
   }
 
   bool
