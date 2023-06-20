@@ -170,8 +170,8 @@ namespace llarp::dns
         hdr.Encode(&buf);
 
         // remove pending query
-        if(auto ptr = query->parent.lock())
-          ptr->call([id=query->id, ptr]() { ptr->m_Pending.erase(id); });
+        if (auto ptr = query->parent.lock())
+          ptr->call([id = query->id, ptr]() { ptr->m_Pending.erase(id); });
         // send reply
         query->SendReply(std::move(pkt));
       }
@@ -417,7 +417,7 @@ namespace llarp::dns
         if (m_ctx)
         {
           const auto pending = m_Pending;
-          for(auto id : pending)
+          for (auto id : pending)
             ::ub_cancel(m_ctx, id);
           m_Pending.clear();
           ::ub_ctx_delete(m_ctx);
@@ -491,6 +491,14 @@ namespace llarp::dns
             return true;
           }
         }
+
+        if (not m_ctx)
+        {
+          // we are down
+          tmp->Cancel();
+          return true;
+        }
+
         const auto& q = query.questions[0];
         if (auto err = ub_resolve_async(
                 m_ctx,

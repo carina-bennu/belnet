@@ -1087,8 +1087,8 @@ namespace llarp
       }
     }
     
-    // if we need more sessions to routers and we are not a master node kicked from the network or we are a client
-    // we shall connect out to others
+    // if we need more sessions to routers and we are not a master node kicked from the network or 
+    // we are a client we shall connect out to others
     if (connected < connectToNum and (LooksFunded() or not isSvcNode))
     {
       size_t dlt = connectToNum - connected;
