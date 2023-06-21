@@ -55,8 +55,8 @@ elif [ -e build-mac ]; then
     mv build-mac/Belnet*/ "$base"
     tar cJvf "$archive" "$base"
 else
-    cp -av daemon/belnet daemon/belnet-vpn "$base"
-    cp -av ../contrib/bootstrap/mainnet.signed "$base/bootstrap.signed"
+    cp -av build/daemon/belnet{,-vpn} "$base"
+    cp -av contrib/bootstrap/mainnet.signed "$base/bootstrap.signed"
     # tar dat shiz up yo
     archive="$base.tar.xz"
     tar cJvf "$archive" "$base"
