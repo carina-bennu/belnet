@@ -126,7 +126,8 @@ namespace llarp::win32
       }
 
 
-      virtual bool WritePacket(net::IPPacket) override
+      virtual bool
+      WritePacket(net::IPPacket) override
       {
         return false;
       }
