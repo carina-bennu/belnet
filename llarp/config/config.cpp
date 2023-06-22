@@ -300,9 +300,9 @@ namespace llarp
             throw std::invalid_argument{"duplicate strict connect mnode: " + value};
         },
         Comment{
-            "Public key of a router which will act as a pinned first-hop. This may be used to",
+            "Public keys of routers which will act as pinned first-hops. This may be used to",
             "provide a trusted router (consider that you are not fully anonymous with your",
-            "first hop).",
+            "first hop).  This REQUIRES two or more nodes to be specified.",
         });
 
     conf.defineOption<std::string>(
@@ -1424,6 +1424,7 @@ namespace llarp
     params->isRelay = isRelay;
     params->defaultDataDir = m_DataDir;
     ConfigDefinition conf{isRelay};
+    addBackwardsCompatibleConfigOptions(conf);
     initializeConfig(conf, *params);
 
     for (const auto& item : m_Additional)
