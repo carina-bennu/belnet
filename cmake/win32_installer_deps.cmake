@@ -1,24 +1,4 @@
 
-
-
-if(NOT BUILD_GUI)
-  if(NOT GUI_ZIP_URL)
-    set(GUI_ZIP_URL "https://testdeb.beldex.dev/Beldex-Projects/Belnet/belnet-gui.zip")
-  endif()
-
-  file(DOWNLOAD
-    ${GUI_ZIP_URL}
-    ${CMAKE_BINARY_DIR}/belnet-gui.zip)
-
-  # We expect the produced .zip file above to extract to ./gui/belnet-gui.exe
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${CMAKE_BINARY_DIR}/belnet-gui.zip
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-  if(NOT EXISTS ${CMAKE_BINARY_DIR}/gui/belnet-gui.exe)
-    message(FATAL_ERROR "Downloaded gui archive from ${GUI_ZIP_URL} does not contain gui/belnet-gui.exe!")
-  endif()
-endif()
-
 install(DIRECTORY ${CMAKE_BINARY_DIR}/gui DESTINATION share COMPONENT gui)
 
 if(WITH_WINDOWS_32)
