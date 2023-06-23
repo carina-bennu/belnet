@@ -859,11 +859,11 @@ namespace llarp
     if (IsMasterNode())
     {
       LogInfo(NumberOfConnectedClients(), " client connections");
-      LogInfo(_rc.Age(now), " since we last updated our RC");
-      LogInfo(_rc.TimeUntilExpires(now), " until our RC expires");
+      LogInfo(ToString(_rc.Age(now)), " since we last updated our RC");
+      LogInfo(ToString(_rc.TimeUntilExpires(now)), " until our RC expires");
     }
     if (m_LastStatsReport > 0s)
-      LogInfo(now - m_LastStatsReport, " last reported stats");
+      LogInfo(ToString(now - m_LastStatsReport), " last reported stats");
     m_LastStatsReport = now;
   }
 
@@ -878,7 +878,7 @@ namespace llarp
     if (const auto delta = now - _lastTick; _lastTick != 0s and delta > TimeskipDetectedDuration)
     {
       // we detected a time skip into the futre, thaw the network
-      LogWarn("Timeskip of ", delta, " detected. Resetting network state");
+      LogWarn("Timeskip of ", ToString(delta), " detected. Resetting network state");
       Thaw();
     }
 
@@ -900,14 +900,12 @@ namespace llarp
             " | {} active paths | block {} ",
             pathContext().CurrentTransitPaths(),
             (m_beldexdRpcClient ? m_beldexdRpcClient->BlockHeight() : 0));
+            auto maybe_last = _rcGossiper.LastGossipAt();
         fmt::format_to(
             out,
-            " | gossip: (next/last) {} / ",
-            time_delta<std::chrono::seconds>{_rcGossiper.NextGossipAt()});
-        if (auto maybe = _rcGossiper.LastGossipAt())
-          fmt::format_to(out, "{}", time_delta<std::chrono::seconds>{*maybe});
-        else
-          fmt::format_to(out, "never");
+            " | gossip: (next/last) {} / {}",
+            short_time_from_now(_rcGossiper.NextGossipAt()),
+            maybe_last ? short_time_from_now(*maybe_last) : "never");
       }
       else
       {
