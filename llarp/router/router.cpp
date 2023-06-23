@@ -886,32 +886,32 @@ namespace llarp
     {
       std::string status;
       auto out = std::back_inserter(status);
-      out = fmt::format_to(out, "WATCHDOG=1\nSTATUS=v{}", llarp::VERSION_STR);
+      fmt::format_to(out, "WATCHDOG=1\nSTATUS=v{}", llarp::VERSION_STR);
       if (IsMasterNode())
       {
-        out = fmt::format_to(
+        fmt::format_to(
             out,
             " mnode | known/svc/clients: {}/{}/{}",
             nodedb()->NumLoaded(),
             NumberOfConnectedRouters(),
             NumberOfConnectedClients());
-        out = fmt::format_to(
+        fmt::format_to(
             out,
             " | {} active paths | block {} ",
             pathContext().CurrentTransitPaths(),
             (m_beldexdRpcClient ? m_beldexdRpcClient->BlockHeight() : 0));
-        out = fmt::format_to(
+        fmt::format_to(
             out,
             " | gossip: (next/last) {} / ",
             time_delta<std::chrono::seconds>{_rcGossiper.NextGossipAt()});
         if (auto maybe = _rcGossiper.LastGossipAt())
-          out = fmt::format_to(out, "{}", time_delta<std::chrono::seconds>{*maybe});
+          fmt::format_to(out, "{}", time_delta<std::chrono::seconds>{*maybe});
         else
-          out = fmt::format_to(out, "never");
+          fmt::format_to(out, "never");
       }
       else
       {
-        out = fmt::format_to(
+        fmt::format_to(
             out,
             " client | known/connected: {}/{}",
             nodedb()->NumLoaded(),
@@ -919,7 +919,7 @@ namespace llarp
 
         if (auto ep = hiddenServiceContext().GetDefault())
         {
-          out = fmt::format_to(
+          fmt::format_to(
               out,
               " | paths/endpoints {}/{}",
               pathContext().CurrentOwnedPaths(),
@@ -927,7 +927,7 @@ namespace llarp
 
           if (auto success_rate = ep->CurrentBuildStats().SuccessRatio(); success_rate < 0.5)
           {
-            out = fmt::format_to(
+            fmt::format_to(
                 out, " [ !!! Low Build Success Rate ({:.1f}%) !!! ]", (100.0 * success_rate));
           }
         };
@@ -1286,8 +1286,18 @@ namespace llarp
         // override ip and port as needed
         if (_ourAddress)
         {
-          if (not Net().IsBogon(ai.ip))
-            throw std::runtime_error{"cannot override public ip, it is already set"};
+          const auto ai_ip = ai.IP();
+          const auto override_ip = _ourAddress->getIP();
+
+          auto ai_ip_str = var::visit([](auto&& ip) { return ip.ToString(); }, ai_ip);
+          auto override_ip_str = var::visit([](auto&& ip) { return ip.ToString(); }, override_ip);
+
+          if ((not Net().IsBogonIP(ai_ip)) and (not Net().IsBogonIP(override_ip))
+              and ai_ip != override_ip)
+            throw std::runtime_error{
+                "Belnet is bound to public IP '{}', but public-ip is set to '{}'. Either fix the "
+                "[router]:public-ip setting or set a bind address in the [bind] section of the "
+                "config."_format(ai_ip_str, override_ip_str)};
           ai.fromSockAddr(*_ourAddress);
         }
         if (RouterContact::BlockBogons && Net().IsBogon(ai.ip))
