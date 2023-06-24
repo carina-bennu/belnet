@@ -34,12 +34,14 @@ SERVICE_STATUS_HANDLE SvcStatusHandle;
 bool start_as_daemon = false;
 #endif
 
+static auto logcat = llarp::log::Cat("main");
 std::shared_ptr<llarp::Context> ctx;
 std::promise<int> exit_code;
 
 void
 handle_signal(int sig)
 {
+  llarp::log::info(logcat, "Handling signal {}", sig);
   if (ctx)
     ctx->loop->call([sig] { ctx->HandleSignal(sig); });
   else
@@ -649,7 +651,8 @@ SvcCtrlHandler(DWORD dwCtrl)
   switch (dwCtrl)
   {
     case SERVICE_CONTROL_STOP:
-      // tell servicve we are stopping
+      // tell service we are stopping
+      llarp::log::info(logcat, "Windows service controller gave SERVICE_CONTROL_STOP");
       ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, 0);
       //kill it 
       handle_signal(SIGINT);
@@ -685,10 +688,9 @@ win32_daemon_entry(DWORD, LPTSTR* argv)
 
   // Report initial status to the SCM
   ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 3000);
-  // SCM calls this function with different args than a normal "main" expects,
-  // but belnet_main expects normal args, so set them here instead.  At the
-  // moment we are not passing any args to belnet_main this way anyway though.
-
+  
+  // we hard code the args to belnet_main.
+  // we yoink argv[0] (belnet.exe path) and pass in the new args.
   std::array args = {
       reinterpret_cast<char*>(argv[0]),
       reinterpret_cast<char*>(strdup("c:\\programdata\\belnet\\belnet.ini")),
