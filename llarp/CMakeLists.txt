@@ -49,17 +49,23 @@ target_link_libraries(belnet-platform PUBLIC belnet-cryptography belnet-util Thr
 target_link_libraries(belnet-platform PRIVATE oxenmq::oxenmq)
 
 if (ANDROID)
-  target_sources(belnet-platform PRIVATE android/ifaddrs.c)
+  target_sources(belnet-platform PRIVATE android/ifaddrs.c util/nop_service_manager.cpp)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   target_sources(belnet-platform PRIVATE linux/dbus.cpp)
+  if(WITH_SYSTEMD)
+    target_sources(belnet-platform PRIVATE linux/sd_service_manager.cpp)
+  else()
+    target_sources(belnet-platform PRIVATE util/nop_service_manager.cpp)
+  endif()
 endif()
 
 if (WIN32)
   target_sources(belnet-platform PRIVATE
     net/win32.cpp
     vpn/win32.cpp
+    win32/service_manager.cpp
     win32/exec.cpp)
   add_library(belnet-win32 STATIC
     win32/dll.cpp
@@ -310,6 +316,7 @@ endif()
 
 if(APPLE)
   add_subdirectory(apple)
+  target_sources(belnet-platform PRIVATE util/nop_system_manager.cpp)
 endif()
 
 file(GLOB_RECURSE docs_SRC */*.hpp *.hpp)
