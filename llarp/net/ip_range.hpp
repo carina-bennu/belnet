@@ -1,10 +1,13 @@
 #pragma once
-#include <ostream>
+
 #include "ip.hpp"
 #include "net_bits.hpp"
 #include <llarp/util/bits.hpp>
 #include <llarp/util/buffer.hpp>
 #include <llarp/util/types.hpp>
+
+#include <list>
+#include <optional>
 #include <string>
 
 namespace llarp
@@ -97,6 +100,12 @@ namespace llarp
       return Contains(net::ExpandV4(ip));
     }
 
+    inline bool
+    Contains(const net::ipaddr_t& ip) const
+    {
+      return var::visit([this](auto&& ip) { return Contains(ToHost(ip)); }, ip);
+    }
+
     /// get the highest address on this range
     constexpr huint128_t
     HighestAddr() const
@@ -108,8 +117,8 @@ namespace llarp
     bool
     operator<(const IPRange& other) const
     {
-      return (this->addr & this->netmask_bits) < (other.addr & other.netmask_bits)
-          || this->netmask_bits < other.netmask_bits;
+      auto maskedA = addr & netmask_bits, maskedB = other.addr & other.netmask_bits;
+      return std::tie(maskedA, netmask_bits) < std::tie(maskedB, other.netmask_bits);
     }
 
     bool
@@ -138,6 +147,10 @@ namespace llarp
 
     bool
     BDecode(llarp_buffer_t* buf);
+
+    /// Finds a free private use range not overlapping the given ranges.
+    static std::optional<IPRange>
+    FindPrivateRange(const std::list<IPRange>& excluding);
   };
 
   template <>

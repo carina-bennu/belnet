@@ -611,7 +611,8 @@ namespace llarp
           });
     }
 
-    std::optional<EndpointBase::SendStat> ExitEndpoint::GetStatFor(AddressVariant_t) const
+    std::optional<EndpointBase::SendStat>
+    ExitEndpoint::GetStatFor(AddressVariant_t) const
     {
       /// TODO: implement me
       return std::nullopt;

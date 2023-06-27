@@ -58,7 +58,7 @@ namespace llarp
       , inbound_link_msg_parser{this}
       , _hiddenServiceContext{this}
       , m_RoutePoker{std::make_shared<RoutePoker>()}
-      , m_RPCServer{new rpc::RpcServer{m_lmq, this}}
+      , m_RPCServer{nullptr}
       , _randomStartDelay{
             platform::is_simulation ? std::chrono::milliseconds{(llarp::randint() % 1250) + 2000}
                                     : 0s}
@@ -385,8 +385,35 @@ namespace llarp
   bool
   Router::Configure(std::shared_ptr<Config> c, bool isMNode, std::shared_ptr<NodeDB> nodedb)
   {
+    llarp::sys::service_manager->starting();
+
     m_Config = std::move(c);
     auto& conf = *m_Config;
+
+    // Do logging config as early as possible to get the configured log level applied
+
+    // Backwards compat: before 0.9.10 we used `type=file` with `file=|-|stdout` for print mode
+    auto log_type = conf.logging.m_logType;
+    if (log_type == log::Type::File
+        && (conf.logging.m_logFile == "stdout" || conf.logging.m_logFile == "-"
+            || conf.logging.m_logFile.empty()))
+      log_type = log::Type::Print;
+
+    if (log::get_level_default() != log::Level::off)
+      log::reset_level(conf.logging.m_logLevel);
+    log::clear_sinks();
+    log::add_sink(log_type, conf.logging.m_logFile);
+
+    enableRPCServer = conf.api.m_enableRPCServer;
+
+    // re-add rpc log sink if rpc enabled, else free it
+    if (enableRPCServer and llarp::logRingBuffer)
+      log::add_sink(llarp::logRingBuffer, llarp::log::DEFAULT_PATTERN_MONO);
+    else
+      llarp::logRingBuffer = nullptr;
+
+    log::debug(logcat, "Configuring router");
+
     whitelistRouters = conf.beldexd.whitelistRouters;
     if (whitelistRouters)
     {
@@ -394,33 +421,39 @@ namespace llarp
       m_beldexdRpcClient = std::make_shared<rpc::BeldexdRpcClient>(m_lmq, weak_from_this());
     }
 
-    enableRPCServer = conf.api.m_enableRPCServer;
     if (enableRPCServer)
       rpcBindAddr = oxenmq::address(conf.api.m_rpcBindAddr);
 
+    log::debug(logcat, "Starting RPC server");
     if (not StartRpcServer())
       throw std::runtime_error("Failed to start rpc server");
 
     if (conf.router.m_workerThreads > 0)
       m_lmq->set_general_threads(conf.router.m_workerThreads);
 
+    log::debug(logcat, "Starting OMQ server");
     m_lmq->start();
 
     _nodedb = std::move(nodedb);
 
     m_isMasterNode = conf.router.m_isRelay;
+    log::debug(
+        logcat, m_isMasterNode ? "Running as a relay (master node)" : "Running as a client");
 
     if (whitelistRouters)
     {
       m_beldexdRpcClient->ConnectAsync(beldexdRPCAddr);
     }
 
-    // fetch keys
+    log::debug(logcat, "Initializing key manager");
     if (not m_keyManager->initialize(conf, true, isMNode))
       throw std::runtime_error("KeyManager failed to initialize");
+
+    log::debug(logcat, "Initializing from configuration");
     if (!FromConfig(conf))
       throw std::runtime_error("FromConfig() failed");
 
+    log::debug(logcat, "Initializing identity");
     if (not EnsureIdentity())
       throw std::runtime_error("EnsureIdentity() failed");
 
@@ -457,6 +490,23 @@ namespace llarp
     return m_isMasterNode;
   }
 
+  bool
+  Router::TooFewPeers() const
+  {
+    constexpr int KnownPeerWarningThreshold = 5;
+    return nodedb()->NumLoaded() < KnownPeerWarningThreshold;
+  }
+
+  std::optional<std::string>
+  Router::BeldexdErrorState() const
+  {
+    // If we're in the white or gray list then we *should* be establishing connections to other
+    // routers, so if we have almost no peers then something is almost certainly wrong.
+    if (LooksFunded() and TooFewPeers())
+      return "too few peer connections; belnet is not adequately connected to the network";
+    return std::nullopt;
+  }
+
   void
   Router::Close()
   {
@@ -482,10 +532,17 @@ namespace llarp
   }
 
   bool
-  Router::LooksDeregistered() const
+  Router::LooksFunded() const
   {
     return IsMasterNode() and whitelistRouters and _rcLookupHandler.HaveReceivedWhitelist()
-        and not _rcLookupHandler.SessionIsAllowed(pubkey());
+        and _rcLookupHandler.SessionIsAllowed(pubkey());
+  }
+
+  bool
+  Router::LooksRegistered() const
+  {
+    return IsMasterNode() and whitelistRouters and _rcLookupHandler.HaveReceivedWhitelist()
+        and _rcLookupHandler.IsRegistered(pubkey());
   }
 
   bool
@@ -570,6 +627,7 @@ namespace llarp
   Router::FromConfig(const Config& conf)
   {
     // Set netid before anything else
+    log::debug(logcat, "Network ID set to {}", conf.router.m_netId);
     if (!conf.router.m_netId.empty() && strcmp(conf.router.m_netId.c_str(), llarp::DEFAULT_NETID))
     {
       const auto& netid = conf.router.m_netId;
@@ -610,28 +668,27 @@ namespace llarp
         _ourAddress->setPort(*maybe_port);
       else
         throw std::runtime_error{"public ip provided without public port"};
+      log::debug(logcat, "Using {} for our public address", *_ourAddress);
     }
+    else
+      log::debug(logcat, "No explicit public address given; will auto-detect during link setup");
 
     RouterContact::BlockBogons = conf.router.m_blockBogons;
-
-    // Beldexd Config
-    whitelistRouters = conf.beldexd.whitelistRouters;
-    beldexdRPCAddr = oxenmq::address(conf.beldexd.beldexdRPCAddr);
-
-    m_isMasterNode = conf.router.m_isRelay;
 
     auto& networkConfig = conf.network;
 
     /// build a set of  strictConnectPubkeys (
-    /// TODO: make this consistent with config -- do we support multiple strict connections
-    //        or not?
     std::unordered_set<RouterID> strictConnectPubkeys;
     if (not networkConfig.m_strictConnect.empty())
     {
       const auto& val = networkConfig.m_strictConnect;
       if (IsMasterNode())
         throw std::runtime_error("cannot use strict-connect option as master node");
+      if (val.size() < 2)
+        throw std::runtime_error(
+            "Must specify more than one strict-connect router if using strict-connect");
       strictConnectPubkeys.insert(val.begin(), val.end());
+      log::debug(logcat, "{} strict-connect routers configured", val.size());
     }
 
     std::vector<fs::path> configRouters = conf.connect.routers;
@@ -640,78 +697,72 @@ namespace llarp
 
     // if our conf had no bootstrap files specified, try the default location of
     // <DATA_DIR>/bootstrap.signed. If this isn't present, leave a useful error message
+    // TODO: use constant
+    fs::path defaultBootstrapFile = conf.router.m_dataDir / "bootstrap.signed";
     if (configRouters.empty() and conf.bootstrap.routers.empty())
     {
-      // TODO: use constant
-      fs::path defaultBootstrapFile = conf.router.m_dataDir / "bootstrap.signed";
+      
       if (fs::exists(defaultBootstrapFile))
       {
         configRouters.push_back(defaultBootstrapFile);
       }
-      else if (not conf.bootstrap.seednode)
-      {
-        LogError("No bootstrap files specified in config file, and the default");
-        LogError("bootstrap file ", defaultBootstrapFile, " does not exist.");
-        LogError("Please provide a bootstrap file (e.g. run 'belnet-bootstrap)'");
-        throw std::runtime_error("No bootstrap files available.");
-      }
     }
 
-    BootstrapList b_list;
+    bootstrapRCList.clear();
     for (const auto& router : configRouters)
     {
-      bool isListFile = false;
-      {
-        std::ifstream inf(router.c_str(), std::ios::binary);
-        if (inf.is_open())
-        {
-          const char ch = inf.get();
-          isListFile = ch == 'l';
-        }
-      }
-      if (isListFile)
-      {
-        if (not BDecodeReadFile(router, b_list))
-        {
-          throw std::runtime_error{fmt::format("failed to read bootstrap list file '{}'", router)};
-        }
-      }
-      else
-      {
-        RouterContact rc;
-        if (not rc.Read(router))
-        {
-          throw std::runtime_error{
-              fmt::format("failed to decode bootstrap RC, file='{}', rc={}", router, rc)};
-        }
-        b_list.insert(rc);
-      }
+      log::debug(logcat, "Loading bootstrap router list from {}", defaultBootstrapFile);
+      bootstrapRCList.AddFromFile(router);
     }
 
     for (const auto& rc : conf.bootstrap.routers)
     {
-      b_list.emplace(rc);
+      bootstrapRCList.emplace(rc);
     }
 
-    for (auto& rc : b_list)
-    {
-      if (not rc.Verify(Now()))
+    // in case someone has an old bootstrap file and is trying to use a bootstrap
+    // that no longer exists
+    auto clearBadRCs = [this]() {
+      for (auto it = bootstrapRCList.begin(); it != bootstrapRCList.end();)
       {
-        LogWarn("ignoring invalid RC: ", RouterID(rc.pubkey));
-        continue;
+        if (it->IsObsoleteBootstrap())
+          log::warning(logcat, "ignoring obsolete boostrap RC: {}", RouterID{it->pubkey});
+        else if (not it->Verify(Now()))
+          log::warning(logcat, "ignoring invalid bootstrap RC: {}", RouterID{it->pubkey});
+        else
+        {
+          ++it;
+          continue;
+        }
+        // we are in one of the above error cases that we warned about:
+        it = bootstrapRCList.erase(it);
       }
-      bootstrapRCList.emplace(std::move(rc));
-    }
+    };
+
+    clearBadRCs();
 
     if (bootstrapRCList.empty() and not conf.bootstrap.seednode)
     {
-      throw std::runtime_error{"we have no bootstrap nodes"};
+      auto fallbacks = llarp::load_bootstrap_fallbacks();
+      if (auto itr = fallbacks.find(_rc.netID.ToString()); itr != fallbacks.end())
+      {
+        bootstrapRCList = itr->second;
+        log::debug(logcat, "loaded {} default fallback bootstrap routers", bootstrapRCList.size());
+        clearBadRCs();
+      }
+      if (bootstrapRCList.empty() and not conf.bootstrap.seednode)
+      {
+        log::error(
+            logcat,
+            "No bootstrap routers were loaded.  The default bootstrap file {} does not exist, and "
+            "loading fallback bootstrap RCs failed.",
+            defaultBootstrapFile);
+        throw std::runtime_error("No bootstrap nodes available.");
+      }
     }
 
     if (conf.bootstrap.seednode)
-    {
       LogInfo("we are a seed node");
-    }
     else
       LogInfo("Loaded ", bootstrapRCList.size(), " bootstrap routers");
 
@@ -774,20 +825,6 @@ namespace llarp
       hiddenServiceContext().AddEndpoint(conf);
     }
 
-    // Logging config
-    
-    // Backwards compat: before 0.9.10 we used `type=file` with `file=|-|stdout` for print mode
-    auto log_type = conf.logging.m_logType;
-    if (log_type == log::Type::File
-        && (conf.logging.m_logFile == "stdout" || conf.logging.m_logFile == "-"
-            || conf.logging.m_logFile.empty()))
-      log_type = log::Type::Print;
-
-    if (log::get_level_default() != log::Level::off)
-      log::reset_level(conf.logging.m_logLevel);
-    log::clear_sinks();
-    log::add_sink(log_type, conf.logging.m_logFile);
-
     return true;
   }
 
@@ -824,12 +861,64 @@ namespace llarp
     if (IsMasterNode())
     {
       LogInfo(NumberOfConnectedClients(), " client connections");
-      LogInfo(_rc.Age(now), " since we last updated our RC");
-      LogInfo(_rc.TimeUntilExpires(now), " until our RC expires");
+      LogInfo(ToString(_rc.Age(now)), " since we last updated our RC");
+      LogInfo(ToString(_rc.TimeUntilExpires(now)), " until our RC expires");
     }
     if (m_LastStatsReport > 0s)
-      LogInfo(now - m_LastStatsReport, " last reported stats");
+      LogInfo(ToString(now - m_LastStatsReport), " last reported stats");
     m_LastStatsReport = now;
+  }
+
+  std::string
+  Router::status_line()
+  {
+    std::string status;
+    auto out = std::back_inserter(status);
+    fmt::format_to(out, "v{}", llarp::VERSION_STR);
+    if (IsMasterNode())
+    {
+      fmt::format_to(
+          out,
+          " mnode | known/svc/clients: {}/{}/{}",
+          nodedb()->NumLoaded(),
+          NumberOfConnectedRouters(),
+          NumberOfConnectedClients());
+      fmt::format_to(
+          out,
+          " | {} active paths | block {} ",
+          pathContext().CurrentTransitPaths(),
+          (m_beldexdRpcClient ? m_beldexdRpcClient->BlockHeight() : 0));
+      auto maybe_last = _rcGossiper.LastGossipAt();
+      fmt::format_to(
+          out,
+          " | gossip: (next/last) {} / {}",
+          short_time_from_now(_rcGossiper.NextGossipAt()),
+          maybe_last ? short_time_from_now(*maybe_last) : "never");
+    }
+    else
+    {
+      fmt::format_to(
+          out,
+          " client | known/connected: {}/{}",
+          nodedb()->NumLoaded(),
+          NumberOfConnectedRouters());
+
+      if (auto ep = hiddenServiceContext().GetDefault())
+      {
+        fmt::format_to(
+            out,
+            " | paths/endpoints {}/{}",
+            pathContext().CurrentOwnedPaths(),
+            ep->UniqueEndpoints());
+
+        if (auto success_rate = ep->CurrentBuildStats().SuccessRatio(); success_rate < 0.5)
+        {
+          fmt::format_to(
+              out, " [ !!! Low Build Success Rate ({:.1f}%) !!! ]", (100.0 * success_rate));
+        }
+      };
+    }
+    return status;
   }
 
   void
@@ -843,63 +932,11 @@ namespace llarp
     if (const auto delta = now - _lastTick; _lastTick != 0s and delta > TimeskipDetectedDuration)
     {
       // we detected a time skip into the futre, thaw the network
-      LogWarn("Timeskip of ", delta, " detected. Resetting network state");
+      LogWarn("Timeskip of ", ToString(delta), " detected. Resetting network state");
       Thaw();
     }
 
-#if defined(WITH_SYSTEMD)
-    {
-      std::string status;
-      auto out = std::back_inserter(status);
-      out = fmt::format_to(out, "WATCHDOG=1\nSTATUS=v{}", llarp::VERSION_STR);
-      if (IsMasterNode())
-      {
-        out = fmt::format_to(
-            out,
-            " mnode | known/svc/clients: {}/{}/{}",
-            nodedb()->NumLoaded(),
-            NumberOfConnectedRouters(),
-            NumberOfConnectedClients());
-        out = fmt::format_to(
-            out,
-            " | {} active paths | block {} ",
-            pathContext().CurrentTransitPaths(),
-            (m_beldexdRpcClient ? m_beldexdRpcClient->BlockHeight() : 0));
-        out = fmt::format_to(
-            out,
-            " | gossip: (next/last) {} / ",
-            time_delta<std::chrono::seconds>{_rcGossiper.NextGossipAt()});
-        if (auto maybe = _rcGossiper.LastGossipAt())
-          out = fmt::format_to(out, "{}", time_delta<std::chrono::seconds>{*maybe});
-        else
-          out = fmt::format_to(out, "never");
-      }
-      else
-      {
-        out = fmt::format_to(
-            out,
-            " client | known/connected: {}/{}",
-            nodedb()->NumLoaded(),
-            NumberOfConnectedRouters());
-
-        if (auto ep = hiddenServiceContext().GetDefault())
-        {
-          out = fmt::format_to(
-              out,
-              " | paths/endpoints {}/{}",
-              pathContext().CurrentOwnedPaths(),
-              ep->UniqueEndpoints());
-
-          if (auto success_rate = ep->CurrentBuildStats().SuccessRatio(); success_rate < 0.5)
-          {
-            out = fmt::format_to(
-                out, " [ !!! Low Build Success Rate ({:.1f}%) !!! ]", (100.0 * success_rate));
-          }
-        };
-      }
-      ::sd_notify(0, status.c_str());
-    }
-#endif
+    llarp::sys::service_manager->report_periodic_stats();
 
     m_PathBuildLimiter.Decay(now);
 
@@ -945,7 +982,7 @@ namespace llarp
       // don't purge bootstrap nodes from nodedb
       if (IsBootstrapNode(rc.pubkey))
       {
-        log::debug(logcat, "Not removing {}: is bootstrap node", rc.pubkey);
+        log::trace(logcat, "Not removing {}: is bootstrap node", rc.pubkey);
         return false;
       }
       // if for some reason we stored an RC that isn't a valid router
@@ -1030,16 +1067,34 @@ namespace llarp
       connectToNum = strictConnect;
     }
 
-   if (auto dereg = LooksDeregistered(); (dereg or decom) and now >= m_NextDecommissionWarn)
+    if (isSvcNode and now >= m_NextDecommissionWarn)
     {
-      constexpr auto DecommissionWarnInterval = 30s;
-      LogError("We are running as a master node but we seem to be ", dereg ? "deregistered" : "decommissioned");
-      m_NextDecommissionWarn = now + DecommissionWarnInterval;
+      constexpr auto DecommissionWarnInterval = 5min;
+      if (auto registered = LooksRegistered(), funded = LooksFunded();
+          not(registered and funded and not decom))
+      {
+        // complain about being deregistered/decommed/unfunded
+        log::error(
+            logcat,
+            "We are running as a master node but we seem to be {}",
+            not registered ? "deregistered"
+                : decom    ? "decommissioned"
+                           : "not fully staked");
+        m_NextDecommissionWarn = now + DecommissionWarnInterval;
+      }
+      else if (TooFewPeers())
+      {
+        log::error(
+            logcat,
+            "We appear to be an active master node, but have only {} known peers.",
+            nodedb()->NumLoaded());
+        m_NextDecommissionWarn = now + DecommissionWarnInterval;
+      }
     }
     
-    // if we need more sessions to routers and we are not a master node kicked from the network
-    // we shall connect out to others
-    if (connected < connectToNum and not LooksDeregistered())
+    // if we need more sessions to routers and we are not a master node kicked from the network or 
+    // we are a client we shall connect out to others
+    if (connected < connectToNum and (LooksFunded() or not isSvcNode))
     {
       size_t dlt = connectToNum - connected;
       LogDebug("connecting to ", dlt, " random routers to keep alive");
@@ -1190,9 +1245,11 @@ namespace llarp
 
   void
   Router::SetRouterWhitelist(
-      const std::vector<RouterID>& whitelist, const std::vector<RouterID>& greylist)
+      const std::vector<RouterID>& whitelist,
+      const std::vector<RouterID>& greylist,
+      const std::vector<RouterID>& unfundedlist)
   {
-    _rcLookupHandler.SetRouterWhitelist(whitelist, greylist);
+    _rcLookupHandler.SetRouterWhitelist(whitelist, greylist, unfundedlist);
   }
 
   bool
@@ -1200,6 +1257,7 @@ namespace llarp
   {
     if (enableRPCServer)
     {
+      m_RPCServer.reset(new rpc::RpcServer{m_lmq, this});
       m_RPCServer->AsyncServeRPC(rpcBindAddr);
       LogInfo("Bound RPC server to ", rpcBindAddr.full_address());
     }
@@ -1230,8 +1288,18 @@ namespace llarp
         // override ip and port as needed
         if (_ourAddress)
         {
-          if (not Net().IsBogon(ai.ip))
-            throw std::runtime_error{"cannot override public ip, it is already set"};
+          const auto ai_ip = ai.IP();
+          const auto override_ip = _ourAddress->getIP();
+
+          auto ai_ip_str = var::visit([](auto&& ip) { return ip.ToString(); }, ai_ip);
+          auto override_ip_str = var::visit([](auto&& ip) { return ip.ToString(); }, override_ip);
+
+          if ((not Net().IsBogonIP(ai_ip)) and (not Net().IsBogonIP(override_ip))
+              and ai_ip != override_ip)
+            throw std::runtime_error{
+                "Belnet is bound to public IP '{}', but public-ip is set to '{}'. Either fix the "
+                "[router]:public-ip setting or set a bind address in the [bind] section of the "
+                "config."_format(ai_ip_str, override_ip_str)};
           ai.fromSockAddr(*_ourAddress);
         }
         if (RouterContact::BlockBogons && Net().IsBogon(ai.ip))
@@ -1335,9 +1403,7 @@ namespace llarp
     m_RoutePoker->Start(this);
     _running.store(true);
     _startedAt = Now();
-#if defined(WITH_SYSTEMD)
-    ::sd_notify(0, "READY=1");
-#endif
+
     if (whitelistRouters)
     {
       // do master node testing if we are in master node whitelist mode
@@ -1408,6 +1474,7 @@ namespace llarp
         }
       });
     }
+    llarp::sys::service_manager->ready();
     return _running;
   }
 
@@ -1459,9 +1526,7 @@ namespace llarp
     if (log::get_level_default() != log::Level::off)
       log::reset_level(log::Level::info);
     LogWarn("stopping router hard");
-#if defined(WITH_SYSTEMD)
-    sd_notify(0, "STOPPING=1\nSTATUS=Shutting down HARD");
-#endif
+    llarp::sys::service_manager->stopping();
     hiddenServiceContext().StopAll();
     _exitContext.Stop();
     StopLinks();
@@ -1480,9 +1545,7 @@ namespace llarp
     if (log::get_level_default() != log::Level::off)
       log::reset_level(log::Level::info);
     LogInfo("stopping router");
-#if defined(WITH_SYSTEMD)
-    sd_notify(0, "STOPPING=1\nSTATUS=Shutting down");
-#endif
+    llarp::sys::service_manager->stopping();
     hiddenServiceContext().StopAll();
     _exitContext.Stop();
     paths.PumpUpstream();

@@ -10,27 +10,15 @@
 set -x
 
 if ! [ -f LICENSE.txt ] || ! [ -d llarp ]; then
-    echo "You need to run this as ./contrib/mac.sh from the top-level belnet project directory"
+    echo "You need to run this as ./contrib/mac.sh from the top-level belnet project directory" >&2
+    exit 1
 fi
 
-mkdir -p build-mac
-cd build-mac
-cmake \
-      -G Ninja \
-      -DBUILD_STATIC_DEPS=ON \
-      -DBUILD_LIBBELNET=OFF \
-      -DWITH_TESTS=OFF \
-      -DWITH_BOOTSTRAP=OFF \
-      -DNATIVE_BUILD=OFF \
-      -DWITH_LTO=ON \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DMACOS_SYSTEM_EXTENSION=ON \
-      -DCODESIGN=ON \
-      -DBUILD_PACKAGE=ON \
-      "$@" \
-      ..
-ninja -j1 package
+./contrib/mac-configure.sh "$@"
 
+cd build-mac
+rm -rf Belnet\ *
+ninja -j${JOBS:-1} package
 cd ..
 
 echo -e "Build complete, your app is here:\n"

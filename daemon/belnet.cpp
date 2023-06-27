@@ -7,7 +7,10 @@
 #include <llarp/util/str.hpp>
 
 #ifdef _WIN32
+#include <llarp/win32/service_manager.hpp>
 #include <dbghelp.h>
+#else
+#include <llarp/util/service_manager.hpp>
 #endif
 
 #include <csignal>
@@ -21,25 +24,26 @@ int
 belnet_main(int, char**);
 
 #ifdef _WIN32
-#include <strsafe.h>
 extern "C" LONG FAR PASCAL
 win32_signal_handler(EXCEPTION_POINTERS*);
 extern "C" VOID FAR PASCAL
 win32_daemon_entry(DWORD, LPTSTR*);
-BOOL ReportSvcStatus(DWORD, DWORD, DWORD);
+
 VOID
 insert_description();
-SERVICE_STATUS SvcStatus;
-SERVICE_STATUS_HANDLE SvcStatusHandle;
-bool start_as_daemon = false;
+
 #endif
 
+bool run_as_daemon{false};
+
+static auto logcat = llarp::log::Cat("main");
 std::shared_ptr<llarp::Context> ctx;
 std::promise<int> exit_code;
 
 void
 handle_signal(int sig)
 {
+  llarp::log::info(logcat, "Handling signal {}", sig);
   if (ctx)
     ctx->loop->call([sig] { ctx->HandleSignal(sig); });
   else
@@ -82,9 +86,7 @@ install_win32_daemon()
     llarp::LogError("Cannot install service ", GetLastError());
     return;
   }
-  // just put the flag here. we eat it later on and specify the
-  // config path in the daemon entry point
-  StringCchCat(szPath.data(), 1024, " --win32-daemon");
+  
 
   // Get a handle to the SCM database.
   schSCManager = OpenSCManager(
@@ -292,46 +294,14 @@ run_main_context(std::optional<fs::path> confFile, const llarp::RuntimeOptions o
 }
 
 #ifdef _WIN32
-void
-TellWindowsServiceStopped()
-{
-  ::WSACleanup();
-  if (not start_as_daemon)
-    return;
-
-  llarp::LogInfo("Telling Windows the service has stopped.");
-  if (not ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0))
-  {
-    auto error_code = GetLastError();
-    if (error_code == ERROR_INVALID_DATA)
-      llarp::LogError(
-          "SetServiceStatus failed: \"The specified service status structure is invalid.\"");
-    else if (error_code == ERROR_INVALID_HANDLE)
-      llarp::LogError("SetServiceStatus failed: \"The specified handle is invalid.\"");
-    else
-      llarp::LogError("SetServiceStatus failed with an unknown error.");
-  }
-}
-
-class WindowsServiceStopped
-{
- public:
-  WindowsServiceStopped() = default;
-
-  ~WindowsServiceStopped()
-  {
-    TellWindowsServiceStopped();
-  }
-};
 
 /// minidump generation for windows jizz
 /// will make a coredump when there is an unhandled exception
 LONG
 GenerateDump(EXCEPTION_POINTERS* pExceptionPointers)
 {
-  const auto flags = (MINIDUMP_TYPE)(
-      MiniDumpWithFullMemory | MiniDumpWithFullMemoryInfo | MiniDumpWithHandleData
-      | MiniDumpWithUnloadedModules | MiniDumpWithThreadInfo);
+  const auto flags =
+      (MINIDUMP_TYPE)(MiniDumpWithFullMemory | MiniDumpWithFullMemoryInfo | MiniDumpWithHandleData | MiniDumpWithUnloadedModules | MiniDumpWithThreadInfo);
 
   std::stringstream ss;
   ss << "C:\\ProgramData\\belnet\\crash-" << llarp::time_now_ms().count() << ".dmp";
@@ -369,9 +339,9 @@ main(int argc, char* argv[])
 #else
   SERVICE_TABLE_ENTRY DispatchTable[] = {
       {strdup("belnet"), (LPSERVICE_MAIN_FUNCTION)win32_daemon_entry}, {NULL, NULL}};
-  if (lstrcmpi(argv[1], "--win32-daemon") == 0)
+  if (std::string{argv[1]} == "--win32-daemon")
   {
-    start_as_daemon = true;
+    run_as_daemon = true;
     StartServiceCtrlDispatcher(DispatchTable);
   }
   else
@@ -380,8 +350,12 @@ main(int argc, char* argv[])
 }
 
 int
-belnet_main(int argc, char* argv[])
+belnet_main(int argc, char** argv)
 {
+  // if we are not running as a service disable reporting
+  if (llarp::platform::is_windows and not run_as_daemon)
+    llarp::sys::service_manager->disable();
+
   if (auto result = Belnet_INIT())
     return result;
 
@@ -390,11 +364,13 @@ belnet_main(int argc, char* argv[])
   llarp::log::add_sink(llarp::log::Type::Print, "stderr");
   llarp::log::reset_level(llarp::log::Level::info);
 
+  llarp::logRingBuffer = std::make_shared<llarp::log::RingBufferSink>(100);
+  llarp::log::add_sink(llarp::logRingBuffer, llarp::log::DEFAULT_PATTERN_MONO);
+
   llarp::RuntimeOptions opts;
   opts.showBanner = false;
 
 #ifdef _WIN32
-  WindowsServiceStopped stopped_raii;
   if (startWinsock())
     return -1;
   SetConsoleCtrlHandler(handle_signal_win32, TRUE);
@@ -543,12 +519,8 @@ belnet_main(int argc, char* argv[])
   SetUnhandledExceptionFilter(&GenerateDump);
 #endif
 
-  std::thread main_thread{[&] { run_main_context(configFile, opts); }};
+  std::thread main_thread{[configFile, opts] { run_main_context(configFile, opts); }};
   auto ftr = exit_code.get_future();
-
-#ifdef _WIN32
-  ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
-#endif
 
   do
   {
@@ -580,9 +552,7 @@ belnet_main(int argc, char* argv[])
         llarp::log::critical(deadlock_cat, wtf);
         llarp::log::flush();
       }
-#ifdef _WIN32
-      TellWindowsServiceStopped();
-#endif
+      llarp::sys::service_manager->failed();
       std::abort();
     }
   } while (ftr.wait_for(std::chrono::seconds(1)) != std::future_status::ready);
@@ -607,6 +577,7 @@ belnet_main(int argc, char* argv[])
   }
 
   llarp::log::flush();
+  llarp::sys::service_manager->stopped();
   if (ctx)
   {
     ctx.reset();
@@ -615,29 +586,7 @@ belnet_main(int argc, char* argv[])
 }
 
 #ifdef _WIN32
-BOOL
-ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD dwWaitHint)
-{
-  static DWORD dwCheckPoint = 1;
 
-  // Fill in the SERVICE_STATUS structure.
-  SvcStatus.dwCurrentState = dwCurrentState;
-  SvcStatus.dwWin32ExitCode = dwWin32ExitCode;
-  SvcStatus.dwWaitHint = dwWaitHint;
-
-  if (dwCurrentState == SERVICE_START_PENDING)
-    SvcStatus.dwControlsAccepted = 0;
-  else
-    SvcStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
-
-  if ((dwCurrentState == SERVICE_RUNNING) || (dwCurrentState == SERVICE_STOPPED))
-    SvcStatus.dwCheckPoint = 0;
-  else
-    SvcStatus.dwCheckPoint = dwCheckPoint++;
-
-  // Report the status of the service to the SCM.
-  return SetServiceStatus(SvcStatusHandle, &SvcStatus);
-}
 
 VOID FAR PASCAL
 SvcCtrlHandler(DWORD dwCtrl)
@@ -647,13 +596,15 @@ SvcCtrlHandler(DWORD dwCtrl)
   switch (dwCtrl)
   {
     case SERVICE_CONTROL_STOP:
-      ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-      // Signal the service to stop.
-      handle_signal(SIGINT);
+      // tell service we are stopping
+      llarp::log::info(logcat, "Windows service controller gave SERVICE_CONTROL_STOP");
+      llarp::sys::service_manager->system_changed_our_state(llarp::sys::ServiceState::Stopping);
       return;
 
     case SERVICE_CONTROL_INTERROGATE:
-      break;
+      llarp::log::debug(logcat, "Got win32 service interrogate signal");
+      llarp::sys::service_manager->report_changed_state();
+      return;
 
     default:
       break;
@@ -664,27 +615,24 @@ SvcCtrlHandler(DWORD dwCtrl)
 // to the original belnet entry
 // and only gets called if we get --win32-daemon in the command line
 VOID FAR PASCAL
-win32_daemon_entry(DWORD argc, LPTSTR* argv)
+win32_daemon_entry(DWORD, LPTSTR* argv)
 {
   // Register the handler function for the service
-  SvcStatusHandle = RegisterServiceCtrlHandler("belnet", SvcCtrlHandler);
+  auto* svc = dynamic_cast<llarp::sys::SVC_Manager*>(llarp::sys::service_manager);
+  svc->handle = RegisterServiceCtrlHandler("belnet", SvcCtrlHandler);
 
-  if (!SvcStatusHandle)
+  if (svc->handle == nullptr)
   {
     llarp::LogError("failed to register daemon control handler");
     return;
   }
-
-  // These SERVICE_STATUS members remain as set here
-  SvcStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
-  SvcStatus.dwServiceSpecificExitCode = 0;
-
-  // Report initial status to the SCM
-  ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 3000);
-  // SCM clobbers startup args, regenerate them here
-  argc = 2;
-  argv[1] = strdup("c:\\programdata\\belnet\\belnet.ini");
-  argv[2] = nullptr;
-  belnet_main(argc, argv);
+  
+  // we hard code the args to belnet_main.
+  // we yoink argv[0] (belnet.exe path) and pass in the new args.
+  std::array args = {
+      reinterpret_cast<char*>(argv[0]),
+      reinterpret_cast<char*>(strdup("c:\\programdata\\belnet\\belnet.ini")),
+      reinterpret_cast<char*>(0)};
+  belnet_main(args.size() - 1, args.data());
 }
 #endif

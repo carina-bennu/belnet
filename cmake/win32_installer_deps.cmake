@@ -1,24 +1,4 @@
 
-
-
-if(NOT BUILD_GUI)
-  if(NOT GUI_ZIP_URL)
-    set(GUI_ZIP_URL "https://testdeb.beldex.dev/Beldex-Projects/Belnet/belnet-gui.zip")
-  endif()
-
-  file(DOWNLOAD
-    ${GUI_ZIP_URL}
-    ${CMAKE_BINARY_DIR}/belnet-gui.zip)
-
-  # We expect the produced .zip file above to extract to ./gui/belnet-gui.exe
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${CMAKE_BINARY_DIR}/belnet-gui.zip
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-  if(NOT EXISTS ${CMAKE_BINARY_DIR}/gui/belnet-gui.exe)
-    message(FATAL_ERROR "Downloaded gui archive from ${GUI_ZIP_URL} does not contain gui/belnet-gui.exe!")
-  endif()
-endif()
-
 install(DIRECTORY ${CMAKE_BINARY_DIR}/gui DESTINATION share COMPONENT gui)
 
 if(WITH_WINDOWS_32)
@@ -34,8 +14,14 @@ endif()
 set(BOOTSTRAP_FILE "${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed")
 install(FILES ${BOOTSTRAP_FILE} DESTINATION share COMPONENT belnet RENAME bootstrap.signed)
 
+set(win_ico "${PROJECT_BINARY_DIR}/belnet.ico")
+add_custom_command(OUTPUT "${win_ico}"
+  COMMAND ${PROJECT_SOURCE_DIR}/contrib/make-ico.sh ${PROJECT_SOURCE_DIR}/contrib/belnet.svg "${win_ico}"
+  DEPENDS ${PROJECT_SOURCE_DIR}/contrib/belnet.svg ${PROJECT_SOURCE_DIR}/contrib/make-ico.sh)
+add_custom_target(icon ALL DEPENDS "${win_ico}")
+
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Belnet")
-set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/win32-setup/belnet.ico")
+set(CPACK_NSIS_MUI_ICON "${PROJECT_BINARY_DIR}/belnet.ico")
 set(CPACK_NSIS_DEFINES "RequestExecutionLevel admin")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 
@@ -57,6 +43,5 @@ set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "${_extra_install}")
 set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "${_extra_uninstall}")
 set(CPACK_NSIS_CREATE_ICONS_EXTRA "${_extra_create_icons}")
 set(CPACK_NSIS_DELETE_ICONS_EXTRA "${_extra_delete_icons}")
-set(CPACK_NSIS_MODIFY_PATH ON)
 
 set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")

@@ -55,6 +55,8 @@ namespace llarp
       void
       Command(std::string_view cmd);
 
+      /// triggers a master node list refresh from beldexd; thread-safe and will do nothing if an
+      /// update is already in progress.
       void
       UpdateMasterNodeList();
 
@@ -72,8 +74,10 @@ namespace llarp
         m_lokiMQ->request(*m_Connection, std::move(cmd), std::move(func));
       }
 
+      // Handles a master node list update; takes the "master_node_states" object of an beldexd
+      // "get_master_nodes" rpc request.
       void
-      HandleGotMasterNodeList(std::string json);
+      HandleNewMasterNodeList(const nlohmann::json& json);
 
       // Handles request from beldexd for peer stats on a specific peer
       void
@@ -88,6 +92,7 @@ namespace llarp
 
       std::weak_ptr<AbstractRouter> m_Router;
       std::atomic<bool> m_UpdatingList;
+      std::string m_LastUpdateHash;
 
       std::unordered_map<RouterID, PubKey> m_KeyMap;
 

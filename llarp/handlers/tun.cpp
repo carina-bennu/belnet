@@ -66,7 +66,7 @@ namespace llarp
           : m_Reply{std::move(reply)}, m_OurIP{std::move(our_ip)}, m_Config{std::move(conf)}
       {}
 
-      virtual ~DnsInterceptor() = default;
+      ~DnsInterceptor() override = default;
 
       void
       SendTo(const SockAddr& to, const SockAddr& from, OwnedBuffer buf) const override
@@ -91,23 +91,23 @@ namespace llarp
       bool
       WouldLoop(const SockAddr& to, const SockAddr& from) const override
       {
-#ifdef __APPLE__
-        (void)from;
-        // DNS on Apple is a bit weird because in order for the NetworkExtension itself to send data
-        // through the tunnel we have to proxy DNS requests through Apple APIs (and so our actual
-        // upstream DNS won't be set in our resolvers, which is why the vanilla IsUpstreamResolver
-        // won't work for us.  However when active the mac also only queries the main tunnel IP for
-        // DNS, so we consider anything else to be upstream-bound DNS to let it through the tunnel.
-        return to.asIPv6() != m_OurIP();
-#else
-        if (auto maybe_addr = m_Config.m_QueryBind)
+        if constexpr (platform::is_apple)
+        {
+          // DNS on Apple is a bit weird because in order for the NetworkExtension itself to send
+          // data through the tunnel we have to proxy DNS requests through Apple APIs (and so our
+          // actual upstream DNS won't be set in our resolvers, which is why the vanilla WouldLoop
+          // won't work for us).  However when active the mac also only queries the main tunnel IP
+          // for DNS, so we consider anything else to be upstream-bound DNS to let it through the
+          // tunnel.
+          return to.getIP() != m_OurIP;
+        }
+        else if (auto maybe_addr = m_Config.m_QueryBind)
         {
           const auto& addr = *maybe_addr;
           // omit traffic to and from our dns socket
           return addr == to or addr == from;
         }
         return false;
-#endif
       }
     };
 
@@ -158,44 +158,6 @@ namespace llarp
       if (m_DnsConfig.m_raw_dns)
       {
         auto dns = std::make_shared<TunDNS>(this, m_DnsConfig);
-        if (auto vpn = Router()->GetVPNPlatform())
-        {
-          // get the first local address we know of
-          std::optional<SockAddr> localaddr;
-          for (auto res : dns->GetAllResolvers())
-          {
-            if (localaddr)
-              continue;
-            if (auto ptr = res.lock())
-              localaddr = ptr->GetLocalAddr();
-          }
-          if (platform::is_windows)
-          {
-            auto dns_io = vpn->create_packet_io(0);
-            LogInfo("doing dns queries from ", *localaddr);
-            Router()->loop()->add_ticker(
-                [r = Router(), dns_io, handler = m_PacketRouter, src = localaddr]() {
-                  net::IPPacket pkt = dns_io->ReadNextPacket();
-                  while (not pkt.empty())
-                  {
-                    // reinject if for upstream dns
-                    if (src and pkt.src() == *src)
-                    {
-                      LogInfo("reinject dns");
-                      std::function<void(net::IPPacket)> reply{std::move(pkt.reply)};
-                      reply(std::move(pkt));
-                    }
-                    else
-                    {
-                      LogInfo("got dns packet from ", pkt.src(), " of size ", pkt.size(), "B");
-                      handler->HandleIPPacket(std::move(pkt));
-                    }
-                    pkt = dns_io->ReadNextPacket();
-                  }
-                });
-            m_RawDNS = dns_io;
-          }
-        }
         m_DNS = dns;
         m_PacketRouter->AddUDPHandler(huint16_t{53}, [this, dns](net::IPPacket pkt) {
           auto dns_pkt_src = dns->PacketSource;
@@ -210,11 +172,43 @@ namespace llarp
       }
       else
         m_DNS = std::make_shared<dns::Server>(Loop(), m_DnsConfig, info.index);
-
-      if (m_RawDNS)
-        m_RawDNS->Start();       
+       
       m_DNS->AddResolver(weak_from_this());
       m_DNS->Start();
+
+      if (m_DnsConfig.m_raw_dns)
+      {
+        if (auto vpn = Router()->GetVPNPlatform())
+        {
+          // get the first local address we know of
+          std::optional<SockAddr> localaddr;
+          for (auto res : m_DNS->GetAllResolvers())
+          {
+            if (auto ptr = res.lock())
+            {
+              localaddr = ptr->GetLocalAddr();
+              if (localaddr)
+                break;
+            }
+          }
+          if (platform::is_windows)
+          {
+            auto dns_io = vpn->create_packet_io(0, localaddr);
+            Router()->loop()->add_ticker([r = Router(), dns_io, handler = m_PacketRouter]() {
+              net::IPPacket pkt = dns_io->ReadNextPacket();
+              while (not pkt.empty())
+              {
+                handler->HandleIPPacket(std::move(pkt));
+                pkt = dns_io->ReadNextPacket();
+              }
+            });
+            m_RawDNS = dns_io;
+          }
+        }
+
+        if (m_RawDNS)
+          m_RawDNS->Start();
+      }
     }
 
     util::StatusObject
@@ -266,10 +260,17 @@ namespace llarp
         m_DNS->Reset();
     }
 
-    std::vector<SockAddr>
+    void
     TunEndpoint::ReconfigureDNS(std::vector<SockAddr> servers)
     {
-      return servers;
+      if (m_DNS)
+      {
+        for (auto weak : m_DNS->GetAllResolvers())
+        {
+          if (auto ptr = weak.lock())
+            ptr->ResetResolver(servers);
+        }
+      }
     }
 
     bool

@@ -200,6 +200,13 @@ namespace llarp
     virtual bool
     IsMasterNode() const = 0;
 
+    /// Called to determine if we're in a bad state (which gets reported to our beldexd) that should
+    /// prevent uptime proofs from going out to the network (so that the error state gets noticed).
+    /// Currently this means we require a decent number of peers whenever we are fully staked
+    /// (active or decommed).
+    virtual std::optional<std::string>
+    BeldexdErrorState() const = 0;
+
     virtual bool
     StartRpcServer() = 0;
 
@@ -307,7 +314,9 @@ namespace llarp
     /// set router's master node whitelist
     virtual void
     SetRouterWhitelist(
-        const std::vector<RouterID>& whitelist, const std::vector<RouterID>& greylist) = 0;
+        const std::vector<RouterID>& whitelist,
+        const std::vector<RouterID>& greylist,
+        const std::vector<RouterID>& unfundedlist) = 0;
 
     virtual std::unordered_set<RouterID>
     GetRouterWhitelist() const = 0;
@@ -352,6 +361,9 @@ namespace llarp
     /// gossip an rc if required
     virtual void
     GossipRCIfNeeded(const RouterContact rc) = 0;
+
+    virtual std::string
+    status_line() = 0;
 
     /// Templated convenience function to generate a RouterHive event and
     /// delegate to non-templated (and overridable) function for handling.

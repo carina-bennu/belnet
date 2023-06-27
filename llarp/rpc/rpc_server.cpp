@@ -12,10 +12,17 @@
 #include <llarp/service/name.hpp>
 #include <llarp/router/abstractrouter.hpp>
 #include <llarp/dns/dns.hpp>
+#include <oxenmq/fmt.h>
+
+namespace
+{
+  static auto logcat = llarp::log::Cat("belnet.rpc");
+}  // namespace
 
 namespace llarp::rpc
 {
-  RpcServer::RpcServer(LMQ_ptr lmq, AbstractRouter* r) : m_LMQ(std::move(lmq)), m_Router(r)
+  RpcServer::RpcServer(LMQ_ptr lmq, AbstractRouter* r)
+      : m_LMQ{std::move(lmq)}, m_Router{r}, log_subs{*m_LMQ, llarp::logRingBuffer}
   {}
 
   /// maybe parse json from message paramter at index
@@ -138,6 +145,7 @@ namespace llarp::rpc
   {
     m_LMQ->listen_plain(url.zmq_address());
     m_LMQ->add_category("llarp", oxenmq::AuthLevel::none)
+        .add_request_command("logs", [this](oxenmq::Message& msg) { HandleLogsSubRequest(msg); })
         .add_command(
             "halt",
             [&](oxenmq::Message& msg) {
@@ -469,7 +477,7 @@ namespace llarp::rpc
                   map = false;
                 }
                 const auto range_itr = obj.find("range");
-                if (range_itr == obj.end())
+                if (range_itr == obj.end() or range_itr->is_null())
                 {
                   // platforms without ipv6 support will shit themselves
                   // here if we give them an exit mapping that is ipv6
@@ -492,9 +500,9 @@ namespace llarp::rpc
                   reply(CreateJSONError("ipv6 ranges not supported on this platform"));
                   return;
                 }
-                std::optional<std::string> token;
+                std::string token;
                 const auto token_itr = obj.find("token");
-                if (token_itr != obj.end())
+                if (token_itr != obj.end() and not token_itr->is_null())
                 {
                   token = token_itr->get<std::string>();
                 }
@@ -517,12 +525,11 @@ namespace llarp::rpc
                     auto mapExit = [=](service::Address addr) mutable {
                       ep->MapExitRange(range, addr);
 
-                      r->routePoker()->Up();
                       bool shouldSendAuth = false;
-                      if (token.has_value())
+                      if (not token.empty())
                       {
                         shouldSendAuth = true;
-                        ep->SetAuthInfoForEndpoint(*exit, service::AuthInfo{*token});
+                        ep->SetAuthInfoForEndpoint(*exit, service::AuthInfo{token});
                       }
                       auto onGoodResult = [r, reply](std::string reason) {
                         if (r->HasClientExit())
@@ -709,5 +716,39 @@ namespace llarp::rpc
             reply(CreateJSONResponse("OK"));
           });
         });
+  }
+
+  void
+  RpcServer::HandleLogsSubRequest(oxenmq::Message& m)
+  {
+    if (m.data.size() != 1)
+    {
+      m.send_reply("Invalid subscription request: no log receipt endpoint given");
+      return;
+    }
+
+    auto endpoint = std::string{m.data[0]};
+
+    if (endpoint == "unsubscribe")
+    {
+      log::info(logcat, "New logs unsubscribe request from conn {}@{}", m.conn, m.remote);
+      log_subs.unsubscribe(m.conn);
+      m.send_reply("OK");
+      return;
+    }
+
+    auto is_new = log_subs.subscribe(m.conn, endpoint);
+
+    if (is_new)
+    {
+      log::info(logcat, "New logs subscription request from conn {}@{}", m.conn, m.remote);
+      m.send_reply("OK");
+      log_subs.send_all(m.conn, endpoint);
+    }
+    else
+    {
+      log::debug(logcat, "Renewed logs subscription request from conn id {}@{}", m.conn, m.remote);
+      m.send_reply("ALREADY");
+    }
   }
 }  // namespace llarp::rpc

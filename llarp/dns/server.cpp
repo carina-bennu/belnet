@@ -1,7 +1,11 @@
 #include "server.hpp"
+#include <llarp/constants/platform.hpp>
+#include <llarp/constants/apple.hpp>
 #include "dns.hpp"
+#include <iterator>
 #include <llarp/crypto/crypto.hpp>
 #include <array>
+#include <stdexcept>
 #include <utility>
 #include <llarp/ev/udp_handle.hpp>
 #include <optional>
@@ -9,12 +13,15 @@
 #include <unbound.h>
 #include <uvw.hpp>
 
+#include "oxen/log.hpp"
 #include "sd_platform.hpp"
 #include "nm_platform.hpp"
 #include "win32_platform.hpp"
 
 namespace llarp::dns
 {
+  static auto logcat = log::Cat("dns");
+
   void
   QueryJob_Base::Cancel() const
   {
@@ -39,7 +46,7 @@ namespace llarp::dns
           return;
         if (not m_DNS.MaybeHandlePacket(shared_from_this(), m_LocalAddr, src, std::move(buf)))
         {
-          LogWarn("did not handle dns packet from ", src, " to ", m_LocalAddr);
+          log::warning(logcat, "did not handle dns packet from {} to {}", src, m_LocalAddr);
         }
       });
       m_udp->listen(bindaddr);
@@ -82,7 +89,6 @@ namespace llarp::dns
 
     class Query : public QueryJob_Base
     {
-      std::weak_ptr<Resolver> parent;
       std::shared_ptr<PacketSource_Base> src;
       SockAddr resolverAddr;
       SockAddr askerAddr;
@@ -95,20 +101,22 @@ namespace llarp::dns
           SockAddr toaddr,
           SockAddr fromaddr)
           : QueryJob_Base{std::move(query)}
-          , parent{parent_}
-          , src{pktsrc}
+          , src{std::move(pktsrc)}
           , resolverAddr{std::move(toaddr)}
           , askerAddr{std::move(fromaddr)}
+          , parent{parent_}
       {}
+      std::weak_ptr<Resolver> parent;
+      int id{};
 
       virtual void
       SendReply(llarp::OwnedBuffer replyBuf) const override;
     };
 
     /// Resolver_Base that uses libunbound
-    class Resolver : public Resolver_Base, public std::enable_shared_from_this<Resolver>
+    class Resolver final : public Resolver_Base, public std::enable_shared_from_this<Resolver>
     {
-      std::shared_ptr<ub_ctx> m_ctx;
+      ub_ctx* m_ctx = nullptr;
       std::weak_ptr<EventLoop> m_Loop;
 #ifdef _WIN32
       // windows is dumb so we do ub mainloop in a thread
@@ -119,6 +127,7 @@ namespace llarp::dns
 #endif
 
       std::optional<SockAddr> m_LocalAddr;
+      std::set<int> m_Pending;
 
       struct ub_result_deleter
       {
@@ -146,6 +155,7 @@ namespace llarp::dns
         if (err)
         {
           // some kind of error from upstream
+          log::warning(logcat, "Upstream DNS failure: {}", ub_strerror(err));
           query->Cancel();
           return;
         }
@@ -159,34 +169,173 @@ namespace llarp::dns
         buf.cur = buf.base;
         hdr.Encode(&buf);
 
+        // remove pending query
+        if (auto ptr = query->parent.lock())
+          ptr->call([id = query->id, ptr]() { ptr->m_Pending.erase(id); });
         // send reply
         query->SendReply(std::move(pkt));
       }
 
       void
-      SetOpt(std::string key, std::string val)
+      AddUpstreamResolver(const SockAddr& dns)
       {
-        ub_ctx_set_option(m_ctx.get(), key.c_str(), val.c_str());
+        std::string str = dns.hostString();
+
+        if (const auto port = dns.getPort(); port != 53)
+          fmt::format_to(std::back_inserter(str), "@{}", port);
+
+        if (auto err = ub_ctx_set_fwd(m_ctx, str.c_str()))
+        {
+          throw std::runtime_error{
+              fmt::format("cannot use {} as upstream dns: {}", str, ub_strerror(err))};
+        }
       }
 
+      bool
+      ConfigureAppleTrampoline(const SockAddr& dns)
+      {
+        // On Apple, when we turn on exit mode, we tear down and then reestablish the unbound
+        // resolver: in exit mode, we set use upstream to a localhost trampoline that redirects
+        // packets through the tunnel.  In non-exit mode, we directly use the upstream, so we look
+        // here for a reconfiguration to use the trampoline port to check which state we're in.
+        //
+        // We have to do all this crap because we can't directly connect to upstream from here:
+        // within the network extension, macOS ignores the tunnel we are managing and so, if we
+        // didn't do this, all our DNS queries would leak out around the tunnel.  Instead we have to
+        // bounce things through the objective C trampoline code (which is what actually handles the
+        // upstream querying) so that it can call into Apple's special snowflake API to set up a
+        // socket that has the magic Apple snowflake sauce added on top so that it actually routes
+        // through the tunnel instead of around it.
+        //
+        // But the trampoline *always* tries to send the packet through the tunnel, and that will
+        // only work in exit mode.
+        //
+        // All of this macos behaviour is all carefully and explicitly documented by Apple with
+        // plenty of examples and other exposition, of course, just like all of their wonderful new
+        // APIs to reinvent standard unix interfaces with half-baked replacements.  
+
+
+        if constexpr (platform::is_apple)
+        {
+          if (dns.hostString() == "127.0.0.1" and dns.getPort() == apple::dns_trampoline_port)
+          {
+            // macOS is stupid: the default (0.0.0.0) fails with "send failed: Can't assign
+            // requested address" when unbound tries to connect to the localhost address using a
+            // source address of 0.0.0.0.  
+            SetOpt("outgoing-interface:", "127.0.0.1");
+
+            // The trampoline expects just a single source port (and sends everything back to it).
+            SetOpt("outgoing-range:", "1");
+            SetOpt("outgoing-port-avoid:", "0-65535");
+            SetOpt("outgoing-port-permit:", "{}", apple::dns_trampoline_source_port);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      void
+      ConfigureUpstream(const llarp::DnsConfig& conf)
+      {
+        bool is_apple_tramp = false;
+
+        // set up forward dns
+        for (const auto& dns : conf.m_upstreamDNS)
+        {
+          AddUpstreamResolver(dns);
+          is_apple_tramp = is_apple_tramp or ConfigureAppleTrampoline(dns);
+        }
+          
+
+        if (auto maybe_addr = conf.m_QueryBind; maybe_addr and not is_apple_tramp)
+        {
+          SockAddr addr{*maybe_addr};
+          std::string host{addr.hostString()};
+
+          if (addr.getPort() == 0)
+          {
+            // unbound manages their own sockets because of COURSE it does. so we find an open port
+            // on our system and use it so we KNOW what it is before giving it to unbound to
+            // explicitly bind to JUST that port.
+
+            auto fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+#ifdef _WIN32
+            if (fd == INVALID_SOCKET)
+#else
+            if (fd == -1)
+#endif
+            {
+              throw std::invalid_argument{
+                  fmt::format("Failed to create UDP socket for unbound: {}", strerror(errno))};
+            }
+
+#ifdef _WIN32
+#define CLOSE closesocket
+#else
+#define CLOSE close
+#endif
+            if (0 != bind(fd, static_cast<const sockaddr*>(addr), addr.sockaddr_len()))
+            {
+              CLOSE(fd);
+              throw std::invalid_argument{
+                  fmt::format("Failed to bind UDP socket for unbound: {}", strerror(errno))};
+            }
+            struct sockaddr_storage sas;
+            auto* sa = reinterpret_cast<struct sockaddr*>(&sas);
+            socklen_t sa_len = sizeof(sas);
+            int rc = getsockname(fd, sa, &sa_len);
+            CLOSE(fd);
+#undef CLOSE
+            if (rc != 0)
+            {
+              throw std::invalid_argument{
+                  fmt::format("Failed to query UDP port for unbound: {}", strerror(errno))};
+            }
+            addr = SockAddr{*sa};
+          }
+
+          m_LocalAddr = addr;
+
+          log::info(logcat, "sending dns queries from {}:{}", host, addr.getPort());
+          // set up query bind port if needed
+          SetOpt("outgoing-interface:", host);
+          SetOpt("outgoing-range:", "1");
+          SetOpt("outgoing-port-avoid:", "0-65535");
+          SetOpt("outgoing-port-permit:", "{}", addr.getPort());
+
+        }
+      }
+
+      void
+      SetOpt(const std::string& key, const std::string& val)
+      {
+        ub_ctx_set_option(m_ctx, key.c_str(), val.c_str());
+      }
+
+      // Wrapper around the above that takes 3+ arguments: the 2nd arg gets formatted with the
+      // remaining args, and the formatted string passed to the above as `val`.
+      template <typename... FmtArgs, std::enable_if_t<sizeof...(FmtArgs), int> = 0>
+      void
+      SetOpt(const std::string& key, std::string_view format, FmtArgs&&... args)
+      {
+        SetOpt(key, fmt::format(format, std::forward<FmtArgs>(args)...));
+      }
+
+      // Copy of the DNS config (a copy because on some platforms, like Apple, we change the applied
+      // upstream DNS settings when turning on/off exit mode).
       llarp::DnsConfig m_conf;
 
      public:
       explicit Resolver(const EventLoop_ptr& loop, llarp::DnsConfig conf)
-          : m_ctx{::ub_ctx_create(), ::ub_ctx_delete}, m_Loop{loop}, m_conf{std::move(conf)}
+          : m_Loop{loop}, m_conf{std::move(conf)}
       {
         Up(m_conf);
       }
 
-#ifdef _WIN32
-      virtual ~Resolver()
+      ~Resolver() override
       {
-        running = false;
-        runner.join();
+        Down();
       }
-#else
-      virtual ~Resolver() = default;
-#endif
 
       std::string_view
       ResolverName() const override
@@ -203,7 +352,14 @@ namespace llarp::dns
       void
       Up(const llarp::DnsConfig& conf)
       {
+        if (m_ctx)
+          throw std::logic_error{"Internal error: attempt to Up() dns server multiple times"};
+
+        m_ctx = ::ub_ctx_create();
         // set libunbound settings
+
+        SetOpt("do-tcp:", "no");
+
         for (const auto& [k, v] : conf.m_ExtraOpts)
           SetOpt(k, v);
 
@@ -211,89 +367,35 @@ namespace llarp::dns
         for (const auto& file : conf.m_hostfiles)
         {
           const auto str = file.u8string();
-          if (auto ret = ub_ctx_hosts(m_ctx.get(), str.c_str()))
+          if (auto ret = ub_ctx_hosts(m_ctx, str.c_str()))
           {
             throw std::runtime_error{
                 fmt::format("Failed to add host file {}: {}", file, ub_strerror(ret))};
           }
         }
 
-        // set up forward dns
-        for (const auto& dns : conf.m_upstreamDNS)
-        {
-          std::stringstream ss;
-          auto hoststr = dns.hostString();
-          ss << hoststr;
-
-          if (const auto port = dns.getPort(); port != 53)
-            ss << "@" << port;
-
-          const auto str = ss.str();
-          if (auto err = ub_ctx_set_fwd(m_ctx.get(), str.c_str()))
-          {
-            throw std::runtime_error{
-                fmt::format("cannot use {} as upstream dns: {}", str, ub_strerror(err))};
-          }
-        }
-
-        if (auto maybe_addr = conf.m_QueryBind)
-        {
-          SockAddr addr{*maybe_addr};
-          std::string host{addr.hostString()};
-
-          if (addr.getPort() == 0)
-          {
-            // unbound manages their own sockets because of COURSE it does. so we find an open port
-            // on our system and use it so we KNOW what it is before giving it to unbound to
-            // explicitly bind to JUST that port.
-
-            addrinfo hints{};
-            addrinfo* result{nullptr};
-            hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-            hints.ai_socktype = SOCK_DGRAM;
-            hints.ai_family = AF_INET;
-            if (auto err = getaddrinfo(host.c_str(), nullptr, &hints, &result))
-              throw std::invalid_argument{strerror(err)};
-            addr.setPort(net::port_t{reinterpret_cast<sockaddr_in*>(result->ai_addr)->sin_port});
-            freeaddrinfo(result);
-          }
-
-          m_LocalAddr = addr;
-
-          LogInfo(fmt::format("sening dns queries from {}:{}", host, addr.getPort()));
-          // set up query bind port if needed
-          SetOpt("outgoing-interface:", host);
-          SetOpt("outgoing-range:", "1");
-          SetOpt("outgoing-port-avoid:", "0-65535");
-          SetOpt("outgoing-port-permit:", std::to_string(addr.getPort()));
-
-        }
+        ConfigureUpstream(conf);
 
         // set async
-        ub_ctx_async(m_ctx.get(), 1);
+        ub_ctx_async(m_ctx, 1);
         // setup mainloop
 #ifdef _WIN32
         running = true;
         runner = std::thread{[this]() {
           while (running)
           {
-            if (m_ctx.get())
-              ub_wait(m_ctx.get());
-            std::this_thread::sleep_for(25ms);
+            ub_wait(m_ctx);
+            std::this_thread::sleep_for(10ms);
           }
-          if (m_ctx.get())
-            ub_process(m_ctx.get());
+          ub_process(m_ctx);
         }};
 #else
         if (auto loop = m_Loop.lock())
         {
           if (auto loop_ptr = loop->MaybeGetUVWLoop())
           {
-            m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx.get()));
-            m_Poller->on<uvw::PollEvent>([ptr = std::weak_ptr<ub_ctx>{m_ctx}](auto&, auto&) {
-              if (auto ctx = ptr.lock())
-                ub_process(ctx.get());
-            });
+            m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx));
+            m_Poller->on<uvw::PollEvent>([this](auto&, auto&) { ub_process(m_ctx); });
             m_Poller->start(uvw::PollHandle::Event::READABLE);
             return;
           }
@@ -303,27 +405,24 @@ namespace llarp::dns
       }
 
       void
-      Down()
+      Down() override
       {
 #ifdef _WIN32
-        running = false;
-        runner.join();
+        if (running.exchange(false))
+          runner.join();
 #else
-        m_Poller->close();
-        if (auto loop = m_Loop.lock())
-        {
-          if (auto loop_ptr = loop->MaybeGetUVWLoop())
-          {
-            m_Poller = loop_ptr->resource<uvw::PollHandle>(ub_fd(m_ctx.get()));
-            m_Poller->on<uvw::PollEvent>([ptr = std::weak_ptr<ub_ctx>{m_ctx}](auto&, auto&) {
-              if (auto ctx = ptr.lock())
-                ub_process(ctx.get());
-            });
-            m_Poller->start(uvw::PollHandle::Event::READABLE);
-          }
-        }
+        if (m_Poller)
+          m_Poller->close();
 #endif
-        m_ctx.reset();
+        if (m_ctx)
+        {
+          const auto pending = m_Pending;
+          for (auto id : pending)
+            ::ub_cancel(m_ctx, id);
+          m_Pending.clear();
+          ::ub_ctx_delete(m_ctx);
+          m_ctx = nullptr;
+        }
       }
 
       int
@@ -333,16 +432,12 @@ namespace llarp::dns
       }
 
       void
-      ResetInternalState() override
+      ResetResolver(std::optional<std::vector<SockAddr>> replace_upstream) override
       {
         Down();
+        if (replace_upstream)
+          m_conf.m_upstreamDNS = std::move(*replace_upstream);
         Up(m_conf);
-      }
-
-      void
-      CancelPendingQueries() override
-      {
-        Down();
       }
 
       bool
@@ -366,7 +461,7 @@ namespace llarp::dns
         if (auto loop = m_Loop.lock())
           loop->call(std::forward<Callable>(f));
         else
-          LogError("no mainloop?");
+          log::critical(logcat, "no mainloop?");
       }
 
       bool
@@ -396,22 +491,33 @@ namespace llarp::dns
             return true;
           }
         }
-        // leak bare pointer and try to do the request
-        auto* pending = tmp.release();
+
+        if (not m_ctx)
+        {
+          // we are down
+          tmp->Cancel();
+          return true;
+        }
+
         const auto& q = query.questions[0];
         if (auto err = ub_resolve_async(
-                m_ctx.get(),
+                m_ctx,
                 q.Name().c_str(),
                 q.qtype,
                 q.qclass,
-                (void*)pending,
+                tmp.get(),
                 &Resolver::Callback,
-                nullptr))
+                &tmp->id))
         {
-          // take back ownership on fail
-          LogWarn("failed to send upstream query with libunbound: ", ub_strerror(err));
-          tmp.reset(pending);
+          log::warning(
+              logcat, "failed to send upstream query with libunbound: {}", ub_strerror(err));
           tmp->Cancel();
+        }
+        else
+        {
+          m_Pending.insert(tmp->id);
+          // Leak the bare pointer we gave to unbound; we'll recapture it in Callback
+          (void)tmp.release();
         }
         return true;
       }
@@ -422,12 +528,12 @@ namespace llarp::dns
     {
       if (auto ptr = parent.lock())
       {
-        ptr->call([this, from = resolverAddr, to = askerAddr, buf = replyBuf.copy()] {
+        ptr->call([src = src, from = resolverAddr, to = askerAddr, buf = replyBuf.copy()] {
           src->SendTo(to, from, OwnedBuffer::copy_from(buf));
         });
       }
       else
-        LogError("no source or parent");
+        log::error(logcat, "no source or parent");
     }
   }  // namespace libunbound
 
@@ -441,10 +547,7 @@ namespace llarp::dns
   std::vector<std::weak_ptr<Resolver_Base>>
   Server::GetAllResolvers() const
   {
-    std::vector<std::weak_ptr<Resolver_Base>> all;
-    for (const auto& res : m_Resolvers)
-      all.push_back(res);
-    return all;
+    return {m_Resolvers.begin(), m_Resolvers.end()};
   }
 
   void
@@ -489,7 +592,8 @@ namespace llarp::dns
   {
     if (m_Config.m_upstreamDNS.empty())
     {
-      LogInfo(
+      log::info(
+          logcat,
           "explicitly no upstream dns providers specified, we will not resolve anything but .bdx "
           "and .mnode");
       return nullptr;
@@ -545,8 +649,8 @@ namespace llarp::dns
   void
   Server::AddPacketSource(std::shared_ptr<PacketSource_Base> pkt)
   {
-    m_OwnedPacketSources.push_back(pkt);
     AddPacketSource(std::weak_ptr<PacketSource_Base>{pkt});
+    m_OwnedPacketSources.push_back(std::move(pkt));
   }
 
   void
@@ -555,7 +659,7 @@ namespace llarp::dns
     for (const auto& resolver : m_Resolvers)
     {
       if (auto ptr = resolver.lock())
-        ptr->CancelPendingQueries();
+        ptr->Down();
     }
   }
 
@@ -565,7 +669,7 @@ namespace llarp::dns
     for (const auto& resolver : m_Resolvers)
     {
       if (auto ptr = resolver.lock())
-        ptr->ResetInternalState();
+        ptr->ResetResolver();
     }
   }
 
@@ -586,14 +690,14 @@ namespace llarp::dns
     // dont process to prevent feedback loop
     if (ptr->WouldLoop(to, from))
     {
-      LogWarn("preventing dns packet replay to=", to, " from=", from);
+      log::warning(logcat, "preventing dns packet replay to={} from={}", to, from);
       return false;
     }
 
     auto maybe = MaybeParseDNSMessage(buf);
     if (not maybe)
     {
-      LogWarn("invalid dns message format from ", from, " to dns listener on ", to);
+      log::warning(logcat, "invalid dns message format from {} to dns listener on {}", from, to);
       return false;
     }
 
@@ -620,7 +724,8 @@ namespace llarp::dns
     {
       if (auto res_ptr = resolver.lock())
       {
-        LogDebug("check resolver ", res_ptr->ResolverName(), " for dns from ", from, " to ", to);
+        log::debug(
+            logcat, "check resolver {} for dns from {} to {}", res_ptr->ResolverName(), from, to);
         if (res_ptr->MaybeHookDNS(ptr, msg, to, from))
           return true;
       }

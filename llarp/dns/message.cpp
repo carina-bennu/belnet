@@ -13,6 +13,8 @@ namespace llarp
 {
   namespace dns
   {
+    static auto logcat = log::Cat("dns");
+
     bool
     MessageHeader::Encode(llarp_buffer_t* buf) const
     {
@@ -116,16 +118,16 @@ namespace llarp
       {
         if (!qd.Decode(buf))
         {
-          LogError("failed to decode question");
+          log::error(logcat, "failed to decode question");
           return false;
         }
-        LogDebug("dns question: ", qd);
+        log::debug(logcat, "question: {}", qd);
       }
       for (auto& an : answers)
       {
         if (not an.Decode(buf))
         {
-          LogDebug("failed to decode answer");
+          log::debug(logcat, "failed to decode answer");
           return false;
         }
       }
@@ -158,7 +160,8 @@ namespace llarp
       return OwnedBuffer::copy_used(buf);
     }
 
-    void Message::AddServFail(RR_TTL_t)
+    void
+    Message::AddServFail(RR_TTL_t)
     {
       if (questions.size())
       {
@@ -384,7 +387,8 @@ namespace llarp
       std::copy_n(buf.base, buf.sz, rec.rData.data());
     }
 
-    void Message::AddNXReply(RR_TTL_t)
+    void
+    Message::AddNXReply(RR_TTL_t)
     {
       if (questions.size())
       {

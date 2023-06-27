@@ -307,7 +307,8 @@ namespace llarp
     throw std::logic_error{"Peer stats backend not enabled!"};
   }
 
-  void PeerDb::loadDatabase(std::optional<fs::path>)
+  void
+  PeerDb::loadDatabase(std::optional<fs::path>)
   {}
 
   void
@@ -348,7 +349,8 @@ namespace llarp
   PeerDb::configure(const RouterConfig&)
   {}
 
-  bool PeerDb::shouldFlush(llarp_time_t)
+  bool
+  PeerDb::shouldFlush(llarp_time_t)
   {
     return false;
   }

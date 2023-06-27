@@ -38,6 +38,8 @@ llarp_apple_init(llarp_apple_config* appleconf)
       [](const char* msg, void* nslog) { reinterpret_cast<ns_logger_callback>(nslog)(msg); },
       nullptr,
       reinterpret_cast<void*>(appleconf->ns_logger)));
+  llarp::logRingBuffer = std::make_shared<llarp::log::RingBufferSink>(100);
+  llarp::log::add_sink(llarp::logRingBuffer, llarp::log::DEFAULT_PATTERN_MONO);
 
   try
   {
@@ -90,7 +92,7 @@ llarp_apple_init(llarp_apple_config* appleconf)
 #ifdef MACOS_SYSTEM_EXTENSION
     std::strncpy(
         appleconf->dns_bind_ip,
-        config->dns.m_bind.hostString().c_str(),
+        config->dns.m_bind.front().hostString().c_str(),
         sizeof(appleconf->dns_bind_ip));
 #endif
 

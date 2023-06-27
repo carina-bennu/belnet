@@ -1,8 +1,3 @@
-set(DEFAULT_WITH_BOOTSTRAP ON)
-if(APPLE)
-  set(DEFAULT_WITH_BOOTSTRAP OFF)
-endif()
-option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
 set(exetargets belnet)
 
 if(APPLE)

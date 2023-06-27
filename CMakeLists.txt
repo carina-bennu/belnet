@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)  # bionic's cmake version
+cmake_minimum_required(VERSION 3.13...3.24)  # 3.13 is buster's version
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -31,12 +31,17 @@ project(belnet
 if(APPLE)
     # Apple build number: must be incremented to submit a new build for the same belnet version,
     # should be reset to 0 when the belnet version increments.
-    set(BELNET_APPLE_BUILD 4)
+    set(BELNET_APPLE_BUILD 5)
 endif()
 
 set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
+set(DEFAULT_WITH_BOOTSTRAP ON)
+if(APPLE)
+  set(DEFAULT_WITH_BOOTSTRAP OFF)
+endif()
 
 # Core options
 option(USE_AVX2 "enable avx2 code" OFF)
@@ -52,10 +57,12 @@ option(WARNINGS_AS_ERRORS "treat all warnings as errors. turn off for developmen
 option(WITH_TESTS "build unit tests" OFF)
 option(WITH_HIVE "build simulation stubs" OFF)
 option(BUILD_PACKAGE "builds extra components for making an installer (with 'make package')" OFF)
-option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ON)
+option(WITH_BOOTSTRAP "build belnet-bootstrap tool" ${DEFAULT_WITH_BOOTSTRAP})
 option(WITH_PEERSTATS "build with experimental peerstats db support" OFF)
 option(STRIP_SYMBOLS "strip off all debug symbols into an external archive for all executables built" OFF)
 
+set(BOOTSTRAP_FALLBACK_MAINNET "${PROJECT_SOURCE_DIR}/contrib/bootstrap/mainnet.signed" CACHE PATH "Fallback bootstrap path (mainnet)")
+set(BOOTSTRAP_FALLBACK_TESTNET "${PROJECT_SOURCE_DIR}/contrib/bootstrap/testnet.signed" CACHE PATH "Fallback bootstrap path (testnet)")
 
 include(cmake/enable_lto.cmake)
 
@@ -106,6 +113,8 @@ if (STATIC_LINK)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_STATIC_LIBRARY_SUFFIX})
   message(STATUS "setting static library suffix search")
 endif()
+
+include(cmake/gui-option.cmake)
 
 include(cmake/solaris.cmake)
 include(cmake/win32.cmake)
@@ -173,22 +182,19 @@ if(NOT TARGET sodium)
   export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
 endif()
 
-
-
-
-if(APPLE)
-  add_compile_options(-Wno-deprecated-declarations)
-else()
-  add_compile_options(-Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Werror=vla)
-  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    add_compile_options(-Wno-unknown-warning-option)
-  endif()
-  if(WARN_DEPRECATED)
-    add_compile_options(-Wdeprecated-declarations)
-  else()
-    add_compile_options(-Wno-deprecated-declarations)
-  endif()
+set(warning_flags -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-function -Werror=vla)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  list(APPEND warning_flags -Wno-unknown-warning-option)
 endif()
+if(WARN_DEPRECATED)
+  list(APPEND warning_flags -Wdeprecated-declarations)
+else()
+  list(APPEND warning_flags -Wno-deprecated-declarations)
+endif()
+
+# If we blindly add these directly as compile_options then they get passed to swiftc on Apple and
+# break, so we use a generate expression to set them only for C++/C/ObjC
+add_compile_options("$<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:${warning_flags}>")
 
 if(XSAN)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=${XSAN} -fno-omit-frame-pointer -fno-sanitize-recover")

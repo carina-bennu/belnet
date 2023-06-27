@@ -5,7 +5,7 @@ add_library(belnet-util
   ${CMAKE_CURRENT_BINARY_DIR}/constants/version.cpp
   util/bencode.cpp
   util/buffer.cpp
-  util/fs.cpp
+  util/file.cpp
   util/json.cpp
   util/logging/buffer.cpp
   util/easter_eggs.cpp
@@ -33,6 +33,7 @@ add_library(belnet-platform
   # for networking
   ev/ev.cpp
   ev/libuv.cpp
+  net/interface_info.cpp
   net/ip.cpp
   net/ip_address.cpp
   net/ip_packet.cpp
@@ -48,16 +49,23 @@ target_link_libraries(belnet-platform PUBLIC belnet-cryptography belnet-util Thr
 target_link_libraries(belnet-platform PRIVATE oxenmq::oxenmq)
 
 if (ANDROID)
-  target_sources(belnet-platform PRIVATE android/ifaddrs.c)
+  target_sources(belnet-platform PRIVATE android/ifaddrs.c util/nop_service_manager.cpp)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   target_sources(belnet-platform PRIVATE linux/dbus.cpp)
+  if(WITH_SYSTEMD)
+    target_sources(belnet-platform PRIVATE linux/sd_service_manager.cpp)
+  else()
+    target_sources(belnet-platform PRIVATE util/nop_service_manager.cpp)
+  endif()
 endif()
 
 if (WIN32)
   target_sources(belnet-platform PRIVATE
     net/win32.cpp
+    vpn/win32.cpp
+    win32/service_manager.cpp
     win32/exec.cpp)
   add_library(belnet-win32 STATIC
     win32/dll.cpp
@@ -233,6 +241,24 @@ add_library(belnet-amalgum
   service/tag.cpp
 )
 
+set(BOOTSTRAP_FALLBACKS)
+foreach(bs IN ITEMS MAINNET TESTNET)
+  if(BOOTSTRAP_FALLBACK_${bs})
+    message(STATUS "Building with ${bs} fallback boostrap path \"${BOOTSTRAP_FALLBACK_${bs}}\"")
+    file(READ "${BOOTSTRAP_FALLBACK_${bs}}" bs_data HEX)
+    if(bs STREQUAL TESTNET)
+      set(network "gamma")
+    elseif(bs STREQUAL MAINNET)
+      set(network "belnet")
+    else()
+      string(TOLOWER "${bs}" network)
+    endif()
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "\\\\x\\1" bs_data "${bs_data}")
+    set(BOOTSTRAP_FALLBACKS "${BOOTSTRAP_FALLBACKS}{\"${network}\"s, \"${bs_data}\"sv},\n")
+  endif()
+endforeach()
+configure_file("bootstrap-fallbacks.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/bootstrap-fallbacks.cpp" @ONLY)
+target_sources(belnet-amalgum PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/bootstrap-fallbacks.cpp")
 
 if(WITH_PEERSTATS_BACKEND)
   target_compile_definitions(belnet-amalgum PRIVATE -DBELNET_PEERSTATS_BACKEND)
@@ -290,6 +316,7 @@ endif()
 
 if(APPLE)
   add_subdirectory(apple)
+  target_sources(belnet-platform PRIVATE util/nop_system_manager.cpp)
 endif()
 
 file(GLOB_RECURSE docs_SRC */*.hpp *.hpp)

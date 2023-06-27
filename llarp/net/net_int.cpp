@@ -1,6 +1,7 @@
 #include "net_int.hpp"
 #include "ip.hpp"
 #include <string>
+#include <variant>
 
 #include <oxenc/endian.h>
 namespace llarp
@@ -163,5 +164,11 @@ namespace llarp
   nuint16_t::ToString() const
   {
     return std::to_string(ntohs(n));
+  }
+
+  std::string
+  net::ToString(const ipaddr_t& ipaddr)
+  {
+    return std::visit([](const auto& ip) { return ip.ToString(); }, ipaddr);
   }
 }  // namespace llarp

@@ -7,14 +7,13 @@
 
 namespace llarp
 {
-  namespace
-  {
-    auto logcat = log::Cat("route-poker");
-  }
+  static auto logcat = log::Cat("route-poker");
 
   void
   RoutePoker::AddRoute(net::ipv4addr_t ip)
   {
+    if (not m_up)
+      return;
     bool has_existing = m_PokedRoutes.count(ip);
     // set up route and apply as needed
     auto& gw = m_PokedRoutes[ip];
@@ -25,6 +24,7 @@ namespace llarp
         DisableRoute(ip, gw);
       // update and add new mapping
       gw = *m_CurrentGateway;
+      log::info(logcat, "add route {} via {}", ip, gw);
       EnableRoute(ip, gw);
     }
     else
@@ -57,7 +57,7 @@ namespace llarp
     const auto itr = m_PokedRoutes.find(ip);
     if (itr == m_PokedRoutes.end())
       return;
-
+    log::info(logcat, "del route {} via {}", itr->first, itr->second);
     DisableRoute(itr->first, itr->second);
     m_PokedRoutes.erase(itr);
   }
@@ -66,10 +66,13 @@ namespace llarp
   RoutePoker::Start(AbstractRouter* router)
   {
     m_Router = router;
-    if (m_Router->IsMasterNode())
+    if (not IsEnabled())
       return;
 
-    m_Router->loop()->call_every(100ms, weak_from_this(), [this]() { Update(); });
+    m_Router->loop()->call_every(100ms, weak_from_this(), [self = weak_from_this()]() {
+      if (auto ptr = self.lock())
+        ptr->Update();
+    });
   }
 
   void
@@ -147,35 +150,27 @@ namespace llarp
 
     auto& route = platform->RouteManager();
 
-    // find current gateways
+    // get current gateways, assume sorted by lowest metric first
     auto gateways = route.GetGatewaysNotOnInterface(*vpn);
     std::optional<net::ipv4addr_t> next_gw;
     for (auto& gateway : gateways)
     {
       if (auto* gw_ptr = std::get_if<net::ipv4addr_t>(&gateway))
+      {
         next_gw = *gw_ptr;
+        break;
+      }
     }
-    
-    auto is_equal = [](auto lhs, auto rhs) {
-      if (lhs == std::nullopt and rhs == std::nullopt)
-        return true;
-      if (lhs and rhs)
-        return *lhs == *rhs;
-      return false;
-    };
 
-    // update current gateway and apply state chnages as needed
-    if (not is_equal(m_CurrentGateway, next_gw))
+    // update current gateway and apply state changes as needed
+    if (m_CurrentGateway != next_gw)
     {
       if (next_gw and m_CurrentGateway)
       {
         log::info(logcat, "default gateway changed from {} to {}", *m_CurrentGateway, *next_gw);
         m_CurrentGateway = next_gw;
         m_Router->Thaw();
-        if (m_Router->HasClientExit())
-          Up();
-        else
-          RefreshAllRoutes();
+        RefreshAllRoutes();
       }
       else if (m_CurrentGateway)
       {
@@ -183,12 +178,14 @@ namespace llarp
         m_CurrentGateway = next_gw;
         m_Router->Freeze();
       }
-      else if (next_gw)
+      else  // next_gw and not m_CurrentGateway
       {
         log::info(logcat, "default gateway found at {}", *next_gw);
         m_CurrentGateway = next_gw;
       }
     }
+    else if (m_Router->HasClientExit())
+      Up();
   }
 
   void
@@ -204,23 +201,41 @@ namespace llarp
   void
   RoutePoker::Up()
   {
-    if (IsEnabled())
+    bool was_up = m_up;
+    m_up = true;
+    if (not was_up)
     {
-      vpn::IRouteManager& route = m_Router->GetVPNPlatform()->RouteManager();
+      if (not IsEnabled())
+      {
+        log::warning(logcat, "RoutePoker coming up, but route poking is disabled by config");
+      }
+      else if (not m_CurrentGateway)
+      {
+        log::warning(logcat, "RokerPoker came up, but we don't know of a gateway!");
+      }
+      else
+      {
+        log::info(logcat, "RoutePoker coming up; poking routes");
 
-      // black hole all routes if enabled
-      if (m_Router->GetConfig()->network.m_BlackholeRoutes)
-        route.AddBlackhole();
+        vpn::IRouteManager& route = m_Router->GetVPNPlatform()->RouteManager();
 
-      // explicit route pokes for first hops
-      m_Router->ForEachPeer(
-          [this](auto session, auto) { AddRoute(session->GetRemoteEndpoint().getIPv4()); }, false);
-      // add default route
-      const auto ep = m_Router->hiddenServiceContext().GetDefault();
-      if (auto* vpn = ep->GetVPNInterface())
-        route.AddDefaultRouteViaInterface(*vpn);
+        // black hole all routes if enabled
+        if (m_Router->GetConfig()->network.m_BlackholeRoutes)
+          route.AddBlackhole();
+
+        // explicit route pokes for first hops
+        m_Router->ForEachPeer(
+            [this](auto session, auto) { AddRoute(session->GetRemoteEndpoint().getIPv4()); },
+            false);
+        // add default route
+        const auto ep = m_Router->hiddenServiceContext().GetDefault();
+        if (auto* vpn = ep->GetVPNInterface())
+          route.AddDefaultRouteViaInterface(*vpn);
+        log::info(logcat, "route poker up");
+      }
     }
-    SetDNSMode(true);
+    if (not was_up)
+      SetDNSMode(true);
   }
 
   void
@@ -230,7 +245,7 @@ namespace llarp
     m_Router->ForEachPeer(
         [this](auto session, auto) { DelRoute(session->GetRemoteEndpoint().getIPv4()); }, false);
     // remove default route
-    if (IsEnabled())
+    if (IsEnabled() and m_up)
     {
       vpn::IRouteManager& route = m_Router->GetVPNPlatform()->RouteManager();
       const auto ep = m_Router->hiddenServiceContext().GetDefault();
@@ -239,7 +254,10 @@ namespace llarp
 
       // delete route blackhole
       route.DelBlackhole();
+      log::info(logcat, "route poker down");
     }
-    SetDNSMode(false);
+    if (m_up)
+      SetDNSMode(false);
+    m_up = false;
   }
 }  // namespace llarp

@@ -11,6 +11,8 @@ namespace llarp::dns
   void
   Multi_Platform::set_resolver(unsigned int index, llarp::SockAddr dns, bool global)
   {
+    if (m_Impls.empty())
+      return;
     size_t fails{0};
     for (const auto& ptr : m_Impls)
     {
@@ -20,7 +22,7 @@ namespace llarp::dns
       }
       catch (std::exception& ex)
       {
-        LogWarn(ex.what());
+        log::warning(log::Cat("dns"), "{}", ex.what());
         fails++;
       }
     }

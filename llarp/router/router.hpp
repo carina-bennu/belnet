@@ -35,6 +35,7 @@
 #include <llarp/util/status.hpp>
 #include <llarp/util/str.hpp>
 #include <llarp/util/time.hpp>
+#include <llarp/util/service_manager.hpp>
 
 #include <functional>
 #include <list>
@@ -143,7 +144,9 @@ namespace llarp
 
     void
     SetRouterWhitelist(
-        const std::vector<RouterID>& whitelist, const std::vector<RouterID>& greylist) override;
+        const std::vector<RouterID>& whitelist,
+        const std::vector<RouterID>& greylist,
+        const std::vector<RouterID>& unfunded) override;
 
     std::unordered_set<RouterID>
     GetRouterWhitelist() const override
@@ -203,9 +206,16 @@ namespace llarp
     bool
     LooksDecommissioned() const;
 
-    /// return true if we look like we are a deregistered master node
+    /// return true if we look like we are a registered, fully-staked master node (either active or
+    /// decommissioned).  This condition determines when we are allowed to (and attempt to) connect
+    /// to other peers when running as a master node.
     bool
-    LooksDeregistered() const;
+    LooksFunded() const;
+
+    /// return true if we a registered master node; not that this only requires a partial stake,
+    /// and does not imply that this master node is *active* or fully funded.
+    bool
+    LooksRegistered() const;
 
     /// return true if we look like we are allowed and able to test other routers
     bool
@@ -306,6 +316,9 @@ namespace llarp
     RCLookupHandler _rcLookupHandler;
     RCGossiper _rcGossiper;
 
+    std::string
+    status_line() override;
+
     using Clock_t = std::chrono::steady_clock;
     using TimePoint_t = Clock_t::time_point;
 
@@ -377,6 +390,9 @@ namespace llarp
     /// return true if we are running in master node mode
     bool
     IsMasterNode() const override;
+
+    std::optional<std::string>
+    BeldexdErrorState() const override;
 
     void
     Close();
@@ -550,8 +566,11 @@ namespace llarp
 
     bool m_isMasterNode = false;
 
+    // Delay warning about being decommed/dereged until we've had enough time to sync up with beldexd
+    static constexpr auto DECOMM_WARNING_STARTUP_DELAY = 15s;
+
     llarp_time_t m_LastStatsReport = 0s;
-    llarp_time_t m_NextDecommissionWarn = 0s;
+    llarp_time_t m_NextDecommissionWarn = time_now_ms() + DECOMM_WARNING_STARTUP_DELAY;
     std::shared_ptr<llarp::KeyManager> m_keyManager;
     std::shared_ptr<PeerDb> m_peerDb;
 
@@ -573,6 +592,9 @@ namespace llarp
 
     void
     MessageSent(const RouterID& remote, SendStatus status);
+
+    bool
+    TooFewPeers() const;
 
    protected:
     virtual void

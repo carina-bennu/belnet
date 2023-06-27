@@ -170,6 +170,12 @@ namespace llarp
     }
 
     constexpr bool
+    operator!=(nuint_t x) const
+    {
+      return n != x.n;
+    }
+
+    constexpr bool
     operator==(nuint_t x) const
     {
       return n == x.n;
@@ -224,6 +230,9 @@ namespace llarp
     using flowlabel_t = n_uint32_t;
     using ipv6addr_t = n_uint128_t;
     using ipaddr_t = std::variant<ipv4addr_t, ipv6addr_t>;
+
+    std::string
+    ToString(const ipaddr_t& ip);
 
     huint16_t ToHost(port_t);
     huint32_t ToHost(ipv4addr_t);

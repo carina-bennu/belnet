@@ -115,35 +115,56 @@ namespace llarp
     void
     BeldexdRpcClient::UpdateMasterNodeList()
     {
-      nlohmann::json request, fields;
-      fields["pubkey_ed25519"] = true;
-      fields["master_node_pubkey"] = true;
-      fields["funded"] = true;
-      fields["active"] = true;
-      request["fields"] = fields;
-      m_UpdatingList = true;
+      if (m_UpdatingList.exchange(true))
+        return;  // update already in progress
+
+      nlohmann::json request{
+          {"fields",
+           {
+               {"pubkey_ed25519", true},
+               {"master_node_pubkey", true},
+               {"funded", true},
+               {"active", true},
+               {"block_hash", true},
+           }},
+      };
+      if (!m_LastUpdateHash.empty())
+        request["fields"]["poll_block_hash"] = m_LastUpdateHash;
       Request(
           "rpc.get_master_nodes",
           [self = shared_from_this()](bool success, std::vector<std::string> data) {
-            self->m_UpdatingList = false;
+
             if (not success)
-            {
               LogWarn("failed to update master node list");
-              return;
-            }
-            if (data.size() < 2)
-            {
+            else if (data.size() < 2)
               LogWarn("beldexd gave empty reply for master node list");
-              return;
-            }
-            try
+            else
             {
-              self->HandleGotMasterNodeList(std::move(data[1]));
+              try
+              {
+                auto json = nlohmann::json::parse(std::move(data[1]));
+                if (json.at("status") != "OK")
+                  throw std::runtime_error{"get_master_nodes did not return 'OK' status"};
+                if (auto it = json.find("unchanged");
+                    it != json.end() and it->is_boolean() and it->get<bool>())
+                  LogDebug("master node list unchanged");
+                else
+                {
+                  self->HandleNewMasterNodeList(json.at("master_node_states"));
+                  if (auto it = json.find("block_hash"); it != json.end() and it->is_string())
+                    self->m_LastUpdateHash = it->get<std::string>();
+                  else
+                    self->m_LastUpdateHash.clear();
+                }
+              }
+              catch (const std::exception& ex)
+              {
+                LogError("failed to process master node list: ", ex.what());
+              }
             }
-            catch (std::exception& ex)
-            {
-              LogError("failed to process master node list: ", ex.what());
-            }
+            // set down here so that the 1) we don't start updating until we're completely finished
+            // with the previous update; and 2) so that m_UpdatingList also guards m_LastUpdateHash
+            self->m_UpdatingList = false;
           },
           request.dump());
     }
@@ -155,11 +176,19 @@ namespace llarp
       auto makePingRequest = [self = shared_from_this()]() {
         // send a ping
         PubKey pk{};
-        if (auto r = self->m_Router.lock())
-          pk = r->pubkey();
+        auto r = self->m_Router.lock();
+        if (not r)
+          return;  // router has gone away, maybe shutting down?
+
+        pk = r->pubkey();
+
         nlohmann::json payload = {
             {"pubkey_ed25519", oxenc::to_hex(pk.begin(), pk.end())},
             {"version", {VERSION[0], VERSION[1], VERSION[2]}}};
+
+        if (auto err = r->BeldexdErrorState())
+          payload["error"] = *err;
+
         self->Request(
             "admin.belnet_ping",
             [](bool success, std::vector<std::string> data) {
@@ -167,6 +196,7 @@ namespace llarp
               LogDebug("Received response for ping. Successful: ", success);
             },
             payload.dump());
+
         // subscribe to block updates
         self->Request("sub.block", [](bool success, std::vector<std::string> data) {
           if (data.empty() or not success)
@@ -176,65 +206,54 @@ namespace llarp
           }
           LogDebug("subscribed to new blocks: ", data[0]);
         });
+        // Trigger an update on a regular timer as well in case we missed a block notify for some
+        // reason (e.g. beldexd restarts and loses the subscription); we poll using the last known
+        // hash so that the poll is very cheap (basically empty) if the block hasn't advanced.
+        self->UpdateMasterNodeList();
       };
+      // Fire one ping off right away to get things going.
+      makePingRequest();
       m_lokiMQ->add_timer(makePingRequest, PingInterval);
-      // initial fetch of master node list
-      UpdateMasterNodeList();
     }
 
     void
-    BeldexdRpcClient::HandleGotMasterNodeList(std::string data)
+    BeldexdRpcClient::HandleNewMasterNodeList(const nlohmann::json& j)
     {
-      auto j = nlohmann::json::parse(std::move(data));
-      {
-        const auto itr = j.find("unchanged");
-        if (itr != j.end())
-        {
-          if (itr->get<bool>())
-          {
-            LogDebug("master node list unchanged");
-            return;
-          }
-        }
-      }
       std::unordered_map<RouterID, PubKey> keymap;
-      std::vector<RouterID> activeNodeList, nonActiveNodeList;
+      std::vector<RouterID> activeNodeList, decommNodeList, unfundedNodeList;
+      if (not j.is_array())
+        throw std::runtime_error{
+            "Invalid master node list: expected array of master node states"};
+
+      for (auto& mnode : j)
       {
-        const auto itr = j.find("master_node_states");
-        if (itr != j.end() and itr->is_array())
-        {
-          for (auto j_itr = itr->begin(); j_itr != itr->end(); j_itr++)
-          {
-            const auto ed_itr = j_itr->find("pubkey_ed25519");
-            if (ed_itr == j_itr->end() or not ed_itr->is_string())
-              continue;
-            const auto svc_itr = j_itr->find("master_node_pubkey");
-            if (svc_itr == j_itr->end() or not svc_itr->is_string())
-              continue;
-            const auto funded_itr = j_itr->find("funded");
-            if (funded_itr == j_itr->end() or not funded_itr->is_boolean())
-              continue;
-            const auto active_itr = j_itr->find("active");
-            if (active_itr == j_itr->end() or not active_itr->is_boolean())
-              continue;
-            const bool active = active_itr->get<bool>();
-            const bool funded = funded_itr->get<bool>();
+        const auto ed_itr = mnode.find("pubkey_ed25519");
+        if (ed_itr == mnode.end() or not ed_itr->is_string())
+          continue;
+        const auto svc_itr = mnode.find("master_node_pubkey");
+        if (svc_itr == mnode.end() or not svc_itr->is_string())
+          continue;
+        const auto active_itr = mnode.find("active");
+        if (active_itr == mnode.end() or not active_itr->is_boolean())
+          continue;
+        const bool active = active_itr->get<bool>();
 
-            if (not funded)
-              continue;
+        const auto funded_itr = mnode.find("funded");
+        if (funded_itr == mnode.end() or not funded_itr->is_boolean())
+          continue;
+        const bool funded = funded_itr->get<bool>();
 
-            RouterID rid;
-            PubKey pk;
-            if (rid.FromHex(ed_itr->get<std::string>()) and pk.FromHex(svc_itr->get<std::string>()))
-            {
-              keymap[rid] = pk;
-              if (active)
-                activeNodeList.emplace_back(std::move(rid));
-              else
-                nonActiveNodeList.emplace_back(std::move(rid));
-            }
-          }
-        }
+        RouterID rid;
+        PubKey pk;
+        if (not rid.FromHex(ed_itr->get<std::string_view>())
+            or not pk.FromHex(svc_itr->get<std::string_view>()))
+          continue;
+
+        keymap[rid] = pk;
+        (active       ? activeNodeList
+             : funded ? decommNodeList
+                      : unfundedNodeList)
+            .push_back(std::move(rid));
       }
 
       if (activeNodeList.empty())
@@ -242,17 +261,19 @@ namespace llarp
         LogWarn("got empty master node list, ignoring.");
         return;
       }
+
       // inform router about the new list
       if (auto router = m_Router.lock())
       {
         auto& loop = router->loop();
         loop->call([this,
                     active = std::move(activeNodeList),
-                    inactive = std::move(nonActiveNodeList),
+                    decomm = std::move(decommNodeList),
+                    unfunded = std::move(unfundedNodeList),
                     keymap = std::move(keymap),
                     router = std::move(router)]() mutable {
           m_KeyMap = std::move(keymap);
-          router->SetRouterWhitelist(active, inactive);
+          router->SetRouterWhitelist(active, decomm, unfunded);
         });
       }
       else

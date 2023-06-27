@@ -26,15 +26,24 @@ namespace llarp::net
     void
     iter_adapters(Visit_t&& visit, int af = AF_UNSPEC) const
     {
-      ULONG sz{};
-      GetAdaptersAddresses(af, 0, nullptr, nullptr, &sz);
-      auto ptr = std::make_unique<byte_t[]>(sz);
-      auto* addrs = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(ptr.get());
+      ULONG err;
+      ULONG sz = 15000;  // MS-recommended so that it "never fails", but often fails with a too
+                         // large error.
+      std::unique_ptr<byte_t[]> ptr;
+      PIP_ADAPTER_ADDRESSES addr;
+      int tries = 0;
+      do
+      {
+        ptr = std::make_unique<byte_t[]>(sz);
+        addr = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(ptr.get());
+        err = GetAdaptersAddresses(
+            af, GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX, nullptr, addr, &sz);
+      } while (err == ERROR_BUFFER_OVERFLOW and ++tries < 4);
 
-      if (auto err = GetAdaptersAddresses(af, 0, nullptr, addrs, &sz); err != ERROR_SUCCESS)
+      if (err != ERROR_SUCCESS)
         throw llarp::win32::error{err, "GetAdaptersAddresses()"};
 
-      for (auto* addr = addrs; addr->Next; addr = addr->Next)
+      for (; addr; addr = addr->Next)
         visit(addr);
     }
 
@@ -42,7 +51,7 @@ namespace llarp::net
     bool
     adapter_has_ip(adapter_t* a, ipaddr_t ip) const
     {
-      for (auto* addr = a->FirstUnicastAddress; addr->Next; addr = addr->Next)
+      for (auto* addr = a->FirstUnicastAddress; addr; addr = addr->Next)
       {
         SockAddr saddr{*addr->Address.lpSockaddr};
         LogDebug(fmt::format("'{}' has address '{}'", a->AdapterName, saddr));
@@ -56,7 +65,7 @@ namespace llarp::net
     bool
     adapter_has_fam(adapter_t* a, int af) const
     {
-      for (auto* addr = a->FirstUnicastAddress; addr->Next; addr = addr->Next)
+      for (auto* addr = a->FirstUnicastAddress; addr; addr = addr->Next)
       {
         SockAddr saddr{*addr->Address.lpSockaddr};
         if (saddr.Family() == af)
@@ -133,7 +142,7 @@ namespace llarp::net
     {
       std::list<IPRange> currentRanges;
       iter_adapters([&currentRanges](auto* i) {
-        for (auto* addr = i->FirstUnicastAddress; addr and addr->Next; addr = addr->Next)
+        for (auto* addr = i->FirstUnicastAddress; addr; addr = addr->Next)
         {
           SockAddr saddr{*addr->Address.lpSockaddr};
           currentRanges.emplace_back(
@@ -142,35 +151,7 @@ namespace llarp::net
         }
       });
 
-      auto ownsRange = [&currentRanges](const IPRange& range) -> bool {
-        for (const auto& ownRange : currentRanges)
-        {
-          if (ownRange * range)
-            return true;
-        }
-        return false;
-      };
-      // generate possible ranges to in order of attempts
-      std::list<IPRange> possibleRanges;
-      for (byte_t oct = 16; oct < 32; ++oct)
-      {
-        possibleRanges.emplace_back(IPRange::FromIPv4(172, oct, 0, 1, 16));
-      }
-      for (byte_t oct = 0; oct < 255; ++oct)
-      {
-        possibleRanges.emplace_back(IPRange::FromIPv4(10, oct, 0, 1, 16));
-      }
-      for (byte_t oct = 0; oct < 255; ++oct)
-      {
-        possibleRanges.emplace_back(IPRange::FromIPv4(192, 168, oct, 1, 24));
-      }
-      // for each possible range pick the first one we don't own
-      for (const auto& range : possibleRanges)
-      {
-        if (not ownsRange(range))
-          return range;
-      }
-      return std::nullopt;
+      return IPRange::FindPrivateRange(currentRanges);
     }
 
     std::string
@@ -190,18 +171,27 @@ namespace llarp::net
     AllNetworkInterfaces() const override
     {
       std::vector<InterfaceInfo> all;
-      iter_adapters([&all](auto* a) {
-        auto& cur = all.emplace_back();
-        cur.index = a->IfIndex;
-        cur.name = a->AdapterName;
-        for (auto* addr = a->FirstUnicastAddress; addr and addr->Next; addr = addr->Next)
-        {
-          SockAddr saddr{*addr->Address.lpSockaddr};
-          cur.addrs.emplace_back(
-              saddr.asIPv6(),
-              ipaddr_netmask_bits(addr->OnLinkPrefixLength, addr->Address.lpSockaddr->sa_family));
-        }
-      });
+      for (int af : {AF_INET, AF_INET6})
+        iter_adapters(
+            [&all](auto* a) {
+              auto& cur = all.emplace_back();
+              cur.index = a->IfIndex;
+              cur.name = a->AdapterName;
+              for (auto* addr = a->FirstUnicastAddress; addr; addr = addr->Next)
+              {
+                SockAddr saddr{*addr->Address.lpSockaddr};
+                cur.addrs.emplace_back(
+                    saddr.asIPv6(),
+                    ipaddr_netmask_bits(
+                        addr->OnLinkPrefixLength, addr->Address.lpSockaddr->sa_family));
+              }
+              if (auto* addr = a->FirstGatewayAddress)
+              {
+                SockAddr gw{*addr->Address.lpSockaddr};
+                cur.gateway = gw.getIP();
+              }
+            },
+            af);
       return all;
     }
   };

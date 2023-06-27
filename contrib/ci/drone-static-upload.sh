@@ -19,9 +19,15 @@ set -o xtrace  # Don't start tracing until *after* we write the ssh key
 
 chmod 600 ssh_key
 
-os="${UPLOAD_OS:-$DRONE_STAGE_OS-$DRONE_STAGE_ARCH}"
-if [ -n "$WINDOWS_BUILD_NAME" ]; then
-    os="windows-$WINDOWS_BUILD_NAME"
+os="$UPLOAD_OS"
+if [ -z "$os" ]; then
+    if [ "$DRONE_STAGE_OS" == "darwin" ]; then
+        os="macos-$DRONE_STAGE_ARCH"
+    elif [ -n "$WINDOWS_BUILD_NAME" ]; then
+        os="windows-$WINDOWS_BUILD_NAME"
+    else
+        os="$DRONE_STAGE_OS-$DRONE_STAGE_ARCH"
+    fi
 fi
 
 if [ -n "$DRONE_TAG" ]; then
@@ -51,11 +57,12 @@ elif [ -e build-docs ]; then
     cp -av build-docs/docs/mkdocs.yml build-docs/docs/markdown "$base"
     tar cJvf "$archive" "$base"
 elif [ -e build-mac ]; then
-    archive="$base.dmg"
-    mv build-mac/Belnet*.dmg "$archive"
+    archive="$base.tar.xz"
+    mv build-mac/Belnet*/ "$base"
+    tar cJvf "$archive" "$base"
 else
-    cp -av daemon/belnet daemon/belnet-vpn "$base"
-    cp -av ../contrib/bootstrap/mainnet.signed "$base/bootstrap.signed"
+    cp -av build/daemon/belnet{,-vpn} "$base"
+    cp -av contrib/bootstrap/mainnet.signed "$base/bootstrap.signed"
     # tar dat shiz up yo
     archive="$base.tar.xz"
     tar cJvf "$archive" "$base"
