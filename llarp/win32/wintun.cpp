@@ -205,6 +205,8 @@ namespace llarp::win32
     {
       WINTUN_SESSION_HANDLE _impl;
       HANDLE _handle;
+      std::atomic<bool> ended{false};
+      static_assert(std::atomic<bool>::is_always_lock_free);
 
      public:
       WintunSession() : _impl{nullptr}, _handle{nullptr}
@@ -223,8 +225,9 @@ namespace llarp::win32
       }
       
       void
-      Stop() const
+      Stop()
       {
+        ended = true;
         end_session(_impl);
       }
 
@@ -239,6 +242,8 @@ namespace llarp::win32
       [[nodiscard]] std::pair<std::unique_ptr<PacketWrapper>, bool>
       ReadPacket() const
       {
+        if (ended)
+          return {nullptr, true};
         DWORD sz;
         if (auto* ptr = read_packet(_impl, &sz))
           return {std::unique_ptr<PacketWrapper>{new PacketWrapper{ptr, sz, _impl}}, false};

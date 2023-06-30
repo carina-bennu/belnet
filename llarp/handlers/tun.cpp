@@ -34,6 +34,8 @@ namespace llarp
 {
   namespace handlers
   {
+    static auto logcat = log::Cat("tun");
+    
     bool
     TunEndpoint::MaybeHookDNS(
         std::shared_ptr<dns::PacketSource_Base> source,
