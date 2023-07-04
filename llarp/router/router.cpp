@@ -881,7 +881,7 @@ namespace llarp
   {
     std::string status;
     auto out = std::back_inserter(status);
-    fmt::format_to(out, "v{}", llarp::VERSION_STR);
+    fmt::format_to(out, "v{}", fmt::join(llarp::VERSION, "."));
     if (IsMasterNode())
     {
       fmt::format_to(
