@@ -316,7 +316,7 @@ endif()
 
 if(APPLE)
   add_subdirectory(apple)
-  target_sources(belnet-platform PRIVATE util/nop_system_manager.cpp)
+  target_sources(belnet-platform PRIVATE util/nop_service_manager.cpp)
 endif()
 
 file(GLOB_RECURSE docs_SRC */*.hpp *.hpp)
