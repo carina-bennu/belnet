@@ -155,7 +155,7 @@ namespace llarp
     }
 
     // Iterate over all items on this array to build the global pathStats
-    uint64_t activePaths = 0;
+    uint64_t pathsCount = 0;
     uint64_t success = 0;
     uint64_t attempts = 0;
     for (const auto& builder : builders)
@@ -168,7 +168,7 @@ namespace llarp
         for (const auto& [key, value] : paths.items())
         {
           if (value.is_object() && value.at("status").is_string() && value.at("status") == "established")
-            activePaths++;
+            pathsCount++;
         }
       }
       const auto& buildStats = builder.at("buildStats");
@@ -180,20 +180,26 @@ namespace llarp
     }
     double ratio = static_cast<double>(success) / (attempts + 1);
 
-    return util::StatusObject{
+    util::StatusObject stats{
         {"running", true},
         {"version", llarp::VERSION_FULL},
         {"uptime", to_json(Uptime())},
-        {"authCodes", services["default"]["authCodes"]},
-        {"exitMap", services["default"]["exitMap"]},
-        {"beldexAddress", services["default"]["identity"]},
-        {"numPathsBuilt", activePaths},
+        {"numPathsBuilt", pathsCount},
         {"numPeersConnected", peers},
         {"numRoutersKnown", _nodedb->NumLoaded()},
         {"ratio", ratio},
         {"txRate", tx_rate},
         {"rxRate", rx_rate},
     };
+
+    if (services.is_object())
+    {
+      stats["authCodes"] = services["default"]["authCodes"];
+      stats["exitMap"] = services["default"]["exitMap"];
+      stats["networkReady"] = services["default"]["networkReady"];
+      stats["beldexAddress"] = services["default"]["identity"];
+    }
+    return stats;
   }
 
   bool
