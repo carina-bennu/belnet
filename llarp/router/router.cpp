@@ -1558,7 +1558,8 @@ namespace llarp
     }
 
     _stopping.store(true);
-    if (log::get_level_default() != log::Level::off)
+    if (auto level = log::get_level_default();
+        level > log::Level::info and level != log::Level::off)
       log::reset_level(log::Level::info);
     log::info(logcat, "stopping");
     llarp::sys::service_manager->stopping();
