@@ -385,9 +385,12 @@ namespace llarp
     Endpoint::Stop()
     {
       // stop remote sessions
+      log::debug(logcat, "Endpoint stopping remote sessions.");
       EndpointUtil::StopRemoteSessions(m_state->m_RemoteSessions);
       // stop mnode sessions
+      log::debug(logcat, "Endpoint stopping mnode sessions.");
       EndpointUtil::StopMnodeSessions(m_state->m_MNodeSessions);
+      log::debug(logcat, "Endpoint stopping its path builder.");
       return path::Builder::Stop();
     }
 
