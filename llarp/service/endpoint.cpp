@@ -40,11 +40,6 @@
 #include <uvw.hpp>
 #include <variant>
 
-namespace
-{
-  constexpr size_t MIN_ENDPOINTS_FOR_LNS_LOOKUP = 2;
-} 
-
 namespace llarp
 {
   namespace service
@@ -315,7 +310,7 @@ namespace llarp
       auto obj = path::Builder::ExtractStatus();
       obj["exitMap"] = m_ExitMap.ExtractStatus();
       obj["identity"] = m_Identity.pub.Addr().ToString();
-      obj["networkReady"] = ReadyToDoLookup();
+      obj["networkReady"] = ReadyForNetwork();
 
       util::StatusObject authCodes;
       for (const auto& [service, info] : m_RemoteAuthInfos)
@@ -956,20 +951,28 @@ namespace llarp
       return not m_ExitMap.Empty();
     }
 
-    bool
-    Endpoint::ReadyToDoLookup(std::optional<uint64_t> numPaths) const
+    path::Path::UniqueEndpointSet_t
+    Endpoint::GetUniqueEndpointsForLookup() const
     {
-      if (not numPaths)
-      {
-        path::Path::UniqueEndpointSet_t paths;
-        ForEachPath([&paths](auto path) {
-          if (path and path->IsReady())
-            paths.insert(path);
-        });
-        numPaths = paths.size();
-      }
+      path::Path::UniqueEndpointSet_t paths;
+      ForEachPath([&paths](auto path) {
+        if (path and path->IsReady())
+          paths.insert(path);
+      });
+      return paths;
+    }
 
-      return numPaths >= MIN_ENDPOINTS_FOR_LNS_LOOKUP;
+    bool
+    Endpoint::ReadyForNetwork() const
+    {
+      return IsReady() and ReadyToDoLookup(GetUniqueEndpointsForLookup().size());
+    }
+
+      bool
+    Endpoint::ReadyToDoLookup(size_t num_paths) const
+    {
+      // Currently just checks the number of paths, but could do more checks in the future. (jason)
+      return num_paths >= MIN_ENDPOINTS_FOR_LNS_LOOKUP;
     }
 
     void
@@ -990,11 +993,7 @@ namespace llarp
         return;
       }
       LogInfo(Name(), " looking up LNS name: ", name);
-      path::Path::UniqueEndpointSet_t paths;
-      ForEachPath([&paths](auto path) {
-        if (path and path->IsReady())
-          paths.insert(path);
-      });
+      auto paths = GetUniqueEndpointsForLookup();
 
       // not enough paths
       if (not ReadyToDoLookup(paths.size()))
