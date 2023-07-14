@@ -128,18 +128,12 @@ namespace llarp::win32
 
       [[nodiscard]] auto
       GetAdapterLUID() const
-
-    /// put adapter up
-    void
-    Up(const vpn::InterfaceInfo& info) const
-    {
-      const auto luid = get_adapter_LUID();
-      for (const auto& addr : info.addrs)
       {
         NET_LUID _uid{};
         get_adapter_LUID(_handle, &_uid);
         return _uid;
       }
+
      public:
       explicit WintunAdapter(std::string name)
       {
