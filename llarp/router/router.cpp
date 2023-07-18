@@ -155,7 +155,7 @@ namespace llarp
     }
 
     // Iterate over all items on this array to build the global pathStats
-    uint64_t activePaths = 0;
+    uint64_t pathsCount = 0;
     uint64_t success = 0;
     uint64_t attempts = 0;
     for (const auto& builder : builders)
@@ -168,7 +168,7 @@ namespace llarp
         for (const auto& [key, value] : paths.items())
         {
           if (value.is_object() && value.at("status").is_string() && value.at("status") == "established")
-            activePaths++;
+            pathsCount++;
         }
       }
       const auto& buildStats = builder.at("buildStats");
@@ -180,20 +180,26 @@ namespace llarp
     }
     double ratio = static_cast<double>(success) / (attempts + 1);
 
-    return util::StatusObject{
+    util::StatusObject stats{
         {"running", true},
         {"version", llarp::VERSION_FULL},
         {"uptime", to_json(Uptime())},
-        {"authCodes", services["default"]["authCodes"]},
-        {"exitMap", services["default"]["exitMap"]},
-        {"beldexAddress", services["default"]["identity"]},
-        {"numPathsBuilt", activePaths},
+        {"numPathsBuilt", pathsCount},
         {"numPeersConnected", peers},
         {"numRoutersKnown", _nodedb->NumLoaded()},
         {"ratio", ratio},
         {"txRate", tx_rate},
         {"rxRate", rx_rate},
     };
+
+    if (services.is_object())
+    {
+      stats["authCodes"] = services["default"]["authCodes"];
+      stats["exitMap"] = services["default"]["exitMap"];
+      stats["networkReady"] = services["default"]["networkReady"];
+      stats["beldexAddress"] = services["default"]["identity"];
+    }
+    return stats;
   }
 
   bool
@@ -510,9 +516,10 @@ namespace llarp
   void
   Router::Close()
   {
+    log::info(logcat, "closing");
     if (_onDown)
       _onDown();
-    LogInfo("closing router");
+    log::debug(logcat, "stopping mainloop");
     _loop->stop();
     _running.store(false);
   }
@@ -874,7 +881,7 @@ namespace llarp
   {
     std::string status;
     auto out = std::back_inserter(status);
-    fmt::format_to(out, "v{}", llarp::VERSION_STR);
+    fmt::format_to(out, "v{}", fmt::join(llarp::VERSION, "."));
     if (IsMasterNode())
     {
       fmt::format_to(
@@ -1496,14 +1503,19 @@ namespace llarp
   void
   Router::AfterStopLinks()
   {
+    llarp::sys::service_manager->stopping();
     Close();
+    log::debug(logcat, "stopping oxenmq");
     m_lmq.reset();
   }
 
   void
   Router::AfterStopIssued()
   {
+    llarp::sys::service_manager->stopping();
+    log::debug(logcat, "stopping links");
     StopLinks();
+    log::debug(logcat, "saving nodedb to disk");
     nodedb()->SaveToDisk();
     _loop->call_later(200ms, [this] { AfterStopLinks(); });
   }
@@ -1537,18 +1549,32 @@ namespace llarp
   Router::Stop()
   {
     if (!_running)
+    {
+      log::debug(logcat, "Stop called, but not running");
       return;
+    }
     if (_stopping)
+    {
+      log::debug(logcat, "Stop called, but already stopping");
       return;
+    }
 
     _stopping.store(true);
-    if (log::get_level_default() != log::Level::off)
+    if (auto level = log::get_level_default();
+        level > log::Level::info and level != log::Level::off)
       log::reset_level(log::Level::info);
-    LogInfo("stopping router");
+    log::info(logcat, "stopping");
     llarp::sys::service_manager->stopping();
+    log::debug(logcat, "stopping hidden service context");
     hiddenServiceContext().StopAll();
+    llarp::sys::service_manager->stopping();
+    log::debug(logcat, "stopping exit context");
     _exitContext.Stop();
+    llarp::sys::service_manager->stopping();
+    log::debug(logcat, "final upstream pump");
     paths.PumpUpstream();
+    llarp::sys::service_manager->stopping();
+    log::debug(logcat, "final links pump");
     _linkManager.PumpLinks();
     _loop->call_later(200ms, [this] { AfterStopIssued(); });
   }

@@ -11,17 +11,6 @@
 
 namespace llarp::win32
 {
-  namespace
-  {
-    template <typename T>
-    std::string
-    ip_to_string(T ip)
-    {
-      return var::visit([](auto&& ip) { return ip.ToString(); }, ip);
-    }
-
-    }  // namespace
-
   using namespace llarp::vpn;
   class VPNPlatform : public Platform, public IRouteManager
   {

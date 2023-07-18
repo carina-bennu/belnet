@@ -31,7 +31,7 @@ project(belnet
 if(APPLE)
     # Apple build number: must be incremented to submit a new build for the same belnet version,
     # should be reset to 0 when the belnet version increments.
-    set(BELNET_APPLE_BUILD 5)
+    set(BELNET_APPLE_BUILD 6)
 endif()
 
 set(RELEASE_MOTTO "The Current Thing" CACHE STRING "Release motto")

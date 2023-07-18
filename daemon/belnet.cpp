@@ -34,7 +34,6 @@ insert_description();
 
 #endif
 
-bool run_as_daemon{false};
 
 static auto logcat = llarp::log::Cat("main");
 std::shared_ptr<llarp::Context> ctx;
@@ -334,31 +333,6 @@ GenerateDump(EXCEPTION_POINTERS* pExceptionPointers)
 int
 main(int argc, char* argv[])
 {
-#ifndef _WIN32
-  return belnet_main(argc, argv);
-#else
-  SERVICE_TABLE_ENTRY DispatchTable[] = {
-      {strdup("belnet"), (LPSERVICE_MAIN_FUNCTION)win32_daemon_entry}, {NULL, NULL}};
-  if (std::string{argv[1]} == "--win32-daemon")
-  {
-    run_as_daemon = true;
-    StartServiceCtrlDispatcher(DispatchTable);
-  }
-  else
-    return belnet_main(argc, argv);
-#endif
-}
-
-int
-belnet_main(int argc, char** argv)
-{
-  // if we are not running as a service disable reporting
-  if (llarp::platform::is_windows and not run_as_daemon)
-    llarp::sys::service_manager->disable();
-
-  if (auto result = Belnet_INIT())
-    return result;
-
   // Set up a default, stderr logging for very early logging; we'll replace this later once we read
   // the desired log info from config.
   llarp::log::add_sink(llarp::log::Type::Print, "stderr");
@@ -366,6 +340,40 @@ belnet_main(int argc, char** argv)
 
   llarp::logRingBuffer = std::make_shared<llarp::log::RingBufferSink>(100);
   llarp::log::add_sink(llarp::logRingBuffer, llarp::log::DEFAULT_PATTERN_MONO);
+
+#ifndef _WIN32
+  return belnet_main(argc, argv);
+#else
+  SERVICE_TABLE_ENTRY DispatchTable[] = {
+      {strdup("belnet"), (LPSERVICE_MAIN_FUNCTION)win32_daemon_entry}, {NULL, NULL}};
+  
+  // Try first to run as a service; if this works it fires off to win32_daemon_entry and doesn't
+  // return until the service enters STOPPED state.
+  if (StartServiceCtrlDispatcher(DispatchTable))
+    return 0;
+
+  auto error = GetLastError();
+
+  // We'll get this error if not invoked as a service, which is fine: we can just run directly
+  if (error == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
+  {
+    llarp::sys::service_manager->disable();
+    return belnet_main(argc, argv);
+  }
+  else
+  {
+    llarp::log::critical(
+        logcat, "Error launching service: {}", std::system_category().message(error));
+    return 1;
+  }
+#endif
+}
+
+int
+belnet_main(int argc, char** argv)
+{
+  if (auto result = Belnet_INIT())
+    return result;
 
   llarp::RuntimeOptions opts;
   opts.showBanner = false;
@@ -375,8 +383,8 @@ belnet_main(int argc, char** argv)
     return -1;
   SetConsoleCtrlHandler(handle_signal_win32, TRUE);
 
-  // SetUnhandledExceptionFilter(win32_signal_handler);
 #endif
+
   cxxopts::Options options(
       "belnet",
       "BelNET is a free, open source, private, "
@@ -597,23 +605,23 @@ SvcCtrlHandler(DWORD dwCtrl)
   {
     case SERVICE_CONTROL_STOP:
       // tell service we are stopping
-      llarp::log::info(logcat, "Windows service controller gave SERVICE_CONTROL_STOP");
+      llarp::log::debug(logcat, "Windows service controller gave SERVICE_CONTROL_STOP");
       llarp::sys::service_manager->system_changed_our_state(llarp::sys::ServiceState::Stopping);
+      handle_signal(SIGINT);
       return;
 
     case SERVICE_CONTROL_INTERROGATE:
-      llarp::log::debug(logcat, "Got win32 service interrogate signal");
       llarp::sys::service_manager->report_changed_state();
       return;
 
     default:
+      llarp::log::debug(logcat, "Got win32 unhandled signal {}", dwCtrl);
       break;
   }
 }
 
-// The win32 daemon entry point is just a trampoline that returns control
-// to the original belnet entry
-// and only gets called if we get --win32-daemon in the command line
+// The win32 daemon entry point is where we go when invoked as a windows service; we do the required
+// service dance and then pretend we were invoked via main().
 VOID FAR PASCAL
 win32_daemon_entry(DWORD, LPTSTR* argv)
 {

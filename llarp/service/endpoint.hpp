@@ -49,13 +49,16 @@ namespace llarp
     struct OutboundContext;
 
     /// minimum interval for publishing introsets
-    static constexpr auto IntrosetPublishInterval = path::intro_path_spread / 2;
+    inline constexpr auto IntrosetPublishInterval = path::intro_path_spread / 2;
 
     /// how agressively should we retry publishing introset on failure
-    static constexpr auto IntrosetPublishRetryCooldown = 1s;
+    inline constexpr auto IntrosetPublishRetryCooldown = 1s;
 
     /// how aggressively should we retry looking up introsets
-    static constexpr auto IntrosetLookupCooldown = 250ms;
+    inline constexpr auto IntrosetLookupCooldown = 250ms;
+
+    /// number of unique mnodes we want to talk to do to ons lookups
+    inline constexpr size_t MIN_ENDPOINTS_FOR_LNS_LOOKUP = 2;
 
     struct Endpoint : public path::Builder,
                       public ILookupHolder,
@@ -65,7 +68,9 @@ namespace llarp
       Endpoint(AbstractRouter* r, Context* parent);
       ~Endpoint() override;
 
-      /// return true if we are ready to recv packets from the void
+      /// return true if we are ready to recv packets from the void.
+      /// really should be ReadyForInboundTraffic() but the diff is HUGE and we need to rewrite this
+      /// component anyways.
       bool
       IsReady() const;
 
@@ -517,10 +522,15 @@ namespace llarp
         return false;
       }
 
+      /// return true if we are ready to do outbound and inbound traffic
       bool
-      ReadyToDoLookup(std::optional<uint64_t> numPaths = std::nullopt) const;
+      ReadyForNetwork() const;
 
      protected:
+      bool
+      ReadyToDoLookup(size_t num_paths) const;
+      path::Path::UniqueEndpointSet_t
+      GetUniqueEndpointsForLookup() const;
       IDataHandler* m_DataHandler = nullptr;
       Identity m_Identity;
       net::IPRangeMap<service::Address> m_ExitMap;
