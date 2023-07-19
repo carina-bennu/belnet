@@ -1191,6 +1191,7 @@ namespace llarp
         "beldexd",
         "rpc",
         RelayOnly,
+        Required,
         Comment{
             "oxenmq control address for for communicating with beldexd. Depends on beldexd's",
             "lmq-local-control configuration option. By default this value should be",
