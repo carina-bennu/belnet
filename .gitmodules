@@ -39,3 +39,4 @@
 [submodule "gui"]
 	path = gui
 	url = https://github.com/Beldex-Coin/belnet-gui
+	ignore = dirty
