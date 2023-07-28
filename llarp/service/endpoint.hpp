@@ -57,8 +57,8 @@ namespace llarp
     /// how aggressively should we retry looking up introsets
     inline constexpr auto IntrosetLookupCooldown = 250ms;
 
-    /// number of unique mnodes we want to talk to do to ons lookups
-    inline constexpr size_t MIN_ENDPOINTS_FOR_LNS_LOOKUP = 2;
+    /// number of unique mnodes we want to talk to do to bns lookups
+    inline constexpr size_t MIN_ENDPOINTS_FOR_BNS_LOOKUP = 2;
 
     struct Endpoint : public path::Builder,
                       public ILookupHolder,
@@ -540,9 +540,9 @@ namespace llarp
       std::unordered_map<Address, AuthInfo> m_RemoteAuthInfos;
       std::unique_ptr<quic::TunnelManager> m_quic;
 
-      /// (lns name, optional exit range, optional auth info) for looking up on startup
+      /// (bns name, optional exit range, optional auth info) for looking up on startup
       std::unordered_map<std::string, std::pair<std::optional<IPRange>, std::optional<AuthInfo>>>
-          m_StartupLNSMappings;
+          m_StartupBNSMappings;
 
       RecvPacketQueue_t m_InboundTrafficQueue;
 

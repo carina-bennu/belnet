@@ -44,7 +44,7 @@ namespace llarp::dht
     auto r = dht->impl->GetRouter();
     if (pathID.IsZero() or not r->IsMasterNode())
       return false;
-    r->RpcClient()->LookupLNSNameHash(NameHash, [r, pathID = pathID, TxID = TxID](auto maybe) {
+    r->RpcClient()->LookupBNSNameHash(NameHash, [r, pathID = pathID, TxID = TxID](auto maybe) {
       auto path = r->pathContext().GetPathForTransfer(pathID);
       if (path == nullptr)
         return;

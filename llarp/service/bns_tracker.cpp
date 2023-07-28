@@ -1,9 +1,9 @@
-#include "lns_tracker.hpp"
+#include "bns_tracker.hpp"
 
 namespace llarp::service
 {
-  std::function<void(std::optional<LNSLookupTracker::Addr_t>)>
-  LNSLookupTracker::MakeResultHandler(
+  std::function<void(std::optional<BNSLookupTracker::Addr_t>)>
+  BNSLookupTracker::MakeResultHandler(
       std::string name,
       std::size_t numPeers,
       std::function<void(std::optional<Addr_t>)> resultHandler)
@@ -20,13 +20,13 @@ namespace llarp::service
   }
 
   bool
-  LNSLookupTracker::LookupInfo::IsDone() const
+  BNSLookupTracker::LookupInfo::IsDone() const
   {
     return m_ResultsGotten == m_ResultsNeeded;
   }
 
   void
-  LNSLookupTracker::LookupInfo::HandleOneResult(std::optional<Addr_t> result)
+  BNSLookupTracker::LookupInfo::HandleOneResult(std::optional<Addr_t> result)
   {
     if (result)
     {

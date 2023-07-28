@@ -9,7 +9,7 @@
 #include <llarp/util/compare_ptr.hpp>
 #include <llarp/util/decaying_hashtable.hpp>
 #include <llarp/util/status.hpp>
-#include "lns_tracker.hpp"
+#include "bns_tracker.hpp"
 
 #include <memory>
 #include <queue>
@@ -65,7 +65,7 @@ namespace llarp
       util::DecayingHashTable<std::string, std::variant<Address, RouterID>, std::hash<std::string>>
           nameCache;
 
-      LNSLookupTracker lnsTracker;
+      BNSLookupTracker bnsTracker;
 
       bool
       Configure(const NetworkConfig& conf);

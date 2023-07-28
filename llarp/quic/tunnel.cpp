@@ -441,7 +441,7 @@ namespace llarp::quic
     {
       if (not service::NameIsValid(remote_addr))
         throw std::invalid_argument{"Invalid remote belnet name/address"};
-      // Otherwise it's a valid ONS name, so we'll initiate an ONS lookup below
+      // Otherwise it's a valid BNS name, so we'll initiate an BNS lookup below
     }
 
     // Open the TCP tunnel right away; it will just block new incoming connections until the quic
@@ -516,7 +516,7 @@ namespace llarp::quic
 
     if (!maybe_remote)
     {
-      // We were given an ONS address, so it's a two-step process: first we resolve the ONS name,
+      // We were given an BNS address, so it's a two-step process: first we resolve the BNS name,
       // then we have to build a path to that address.
       service_endpoint_.LookupNameAsync(
           remote_addr,
@@ -525,7 +525,7 @@ namespace llarp::quic
            pport = pport,
            remote_addr = std::move(remote_addr)](auto maybe_remote) {
             if (not continue_connecting(
-                    pport, (bool)maybe_remote, "endpoint ONS lookup", remote_addr))
+                    pport, (bool)maybe_remote, "endpoint BNS lookup", remote_addr))
               return;
             service_endpoint_.MarkAddressOutbound(*maybe_remote);
             service_endpoint_.EnsurePathTo(*maybe_remote, after_path, open_timeout);

@@ -17,16 +17,16 @@ namespace llarp::service
   }
 
   bool
-  NameIsValid(std::string_view lnsName)
+  NameIsValid(std::string_view bnsName)
   {
     // make sure it ends with .bdx because no fucking shit right?
-    if (not ends_with(lnsName, ".bdx"))
+    if (not ends_with(bnsName, ".bdx"))
       return false;
     // strip off .bdx suffix
-    lnsName = lnsName.substr(0, lnsName.find_last_of('.'));
+    bnsName = bnsName.substr(0, bnsName.find_last_of('.'));
 
     // ensure chars are sane
-    for (const auto ch : lnsName)
+    for (const auto ch : bnsName)
     {
       if (ch == '-')
         continue;
@@ -39,12 +39,12 @@ namespace llarp::service
       return false;
     }
     // split into domain parts
-    const auto parts = split(lnsName, ".");
+    const auto parts = split(bnsName, ".");
     // get root domain
     const auto primaryName = parts[parts.size() - 1];
     constexpr size_t MaxNameLen = 32;
     constexpr size_t MaxPunycodeNameLen = 63;
-    // check against lns name blacklist
+    // check against bns name blacklist
     if (primaryName == "localhost")
       return false;
     if (primaryName == "beldex")

@@ -80,12 +80,12 @@ namespace llarp
         SetAuthInfoForEndpoint(exit, auth);
       }
 
-      conf.m_LNSExitMap.ForEachEntry([&](const IPRange& range, const std::string& name) {
+      conf.m_BNSExitMap.ForEachEntry([&](const IPRange& range, const std::string& name) {
         std::optional<AuthInfo> auth;
-        const auto itr = conf.m_LNSExitAuths.find(name);
-        if (itr != conf.m_LNSExitAuths.end())
+        const auto itr = conf.m_BNSExitAuths.find(name);
+        if (itr != conf.m_BNSExitAuths.end())
           auth = itr->second;
-        m_StartupLNSMappings[name] = std::make_pair(range, auth);
+        m_StartupBNSMappings[name] = std::make_pair(range, auth);
       });
 
       return m_state->Configure(conf);
@@ -353,7 +353,7 @@ namespace llarp
 
       if (NumInStatus(path::ePathEstablished) > 1)
       {
-        for (const auto& item : m_StartupLNSMappings)
+        for (const auto& item : m_StartupBNSMappings)
         {
           LookupNameAsync(
               item.first, [name = item.first, info = item.second, this](auto maybe_addr) {
@@ -362,7 +362,7 @@ namespace llarp
                   const auto maybe_range = info.first;
                   const auto maybe_auth = info.second;
 
-                  m_StartupLNSMappings.erase(name);
+                  m_StartupBNSMappings.erase(name);
                   if (auto* addr = std::get_if<service::Address>(&*maybe_addr))
                   {
                     if (maybe_range.has_value())
@@ -908,12 +908,12 @@ namespace llarp
       LookupNameJob(
           Endpoint* parent,
           uint64_t id,
-          std::string lnsName,
+          std::string bnsName,
           std::function<void(std::optional<Address>)> resultHandler)
-          : IServiceLookup(parent, id, lnsName), handler(resultHandler)
+          : IServiceLookup(parent, id, bnsName), handler(resultHandler)
       {
         CryptoManager::instance()->shorthash(
-            namehash, llarp_buffer_t(lnsName.c_str(), lnsName.size()));
+            namehash, llarp_buffer_t(bnsName.c_str(), bnsName.size()));
       }
 
       std::shared_ptr<routing::IMessage>
@@ -942,7 +942,7 @@ namespace llarp
     bool
     Endpoint::HasExit() const
     {
-      for (const auto& [name, info] : m_StartupLNSMappings)
+      for (const auto& [name, info] : m_StartupBNSMappings)
       {
         if (info.first.has_value())
           return true;
@@ -972,7 +972,7 @@ namespace llarp
     Endpoint::ReadyToDoLookup(size_t num_paths) const
     {
       // Currently just checks the number of paths, but could do more checks in the future.
-      return num_paths >= MIN_ENDPOINTS_FOR_LNS_LOOKUP;
+      return num_paths >= MIN_ENDPOINTS_FOR_BNS_LOOKUP;
     }
 
     void
@@ -992,7 +992,7 @@ namespace llarp
         handler(maybe);
         return;
       }
-      LogInfo(Name(), " looking up LNS name: ", name);
+      LogInfo(Name(), " looking up BNS name: ", name);
       auto paths = GetUniqueEndpointsForLookup();
 
       // not enough paths
@@ -1000,10 +1000,10 @@ namespace llarp
       {
         LogWarn(
             Name(),
-            " not enough paths for lns lookup, have ",
+            " not enough paths for bns lookup, have ",
             paths.size(),
             " need ",
-            MIN_ENDPOINTS_FOR_LNS_LOOKUP);
+            MIN_ENDPOINTS_FOR_BNS_LOOKUP);
         handler(std::nullopt);
         return;
       }
@@ -1028,15 +1028,15 @@ namespace llarp
         handler(result);
       };
 
-      constexpr size_t max_lns_lookup_endpoints = 7;
-      // pick up to max_unique_lns_endpoints random paths to do lookups from
+      constexpr size_t max_bns_lookup_endpoints = 7;
+      // pick up to max_unique_bns_endpoints random paths to do lookups from
       std::vector<path::Path_ptr> chosenpaths;
       chosenpaths.insert(chosenpaths.begin(), paths.begin(), paths.end());
       std::shuffle(chosenpaths.begin(), chosenpaths.end(), CSRNG{});
-      chosenpaths.resize(std::min(paths.size(), max_lns_lookup_endpoints));
+      chosenpaths.resize(std::min(paths.size(), max_bns_lookup_endpoints));
 
       auto resultHandler =
-          m_state->lnsTracker.MakeResultHandler(name, chosenpaths.size(), maybeInvalidateCache);
+          m_state->bnsTracker.MakeResultHandler(name, chosenpaths.size(), maybeInvalidateCache);
 
       for (const auto& path : chosenpaths)
       {

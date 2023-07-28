@@ -120,10 +120,10 @@ namespace llarp
     bool m_AllowExit = false;
     std::set<RouterID> m_mnodeBlacklist;
     net::IPRangeMap<service::Address> m_ExitMap;
-    net::IPRangeMap<std::string> m_LNSExitMap;
+    net::IPRangeMap<std::string> m_BNSExitMap;
 
     std::unordered_map<service::Address, service::AuthInfo> m_ExitAuths;
-    std::unordered_map<std::string, service::AuthInfo> m_LNSExitAuths;
+    std::unordered_map<std::string, service::AuthInfo> m_BNSExitAuths;
 
     std::unordered_map<huint128_t, service::Address> m_mapAddrs;
 

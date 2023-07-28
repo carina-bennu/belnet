@@ -45,7 +45,7 @@ namespace llarp::quic
         uint16_t port                   // The requested port the tunnel wants to reach
         )>;
 
-    // Timeout for the next `open()`.  Note that when `open()` is given a ONS name to resolve this
+    // Timeout for the next `open()`.  Note that when `open()` is given a BNS name to resolve this
     // includes the resolution time.
     std::chrono::milliseconds open_timeout = 4s;
 
@@ -83,7 +83,7 @@ namespace llarp::quic
     /// Opens a quic tunnel to some remote belnet address.  (Should only be called from the event
     /// loop thread.)
     ///
-    /// \param remote_addr is the belnet address or ONS name (e.g. `azfojblahblahblah.bdx` or
+    /// \param remote_addr is the belnet address or BNS name (e.g. `azfojblahblahblah.bdx` or
     /// `blocks.bdx`) that the tunnel should connect to.
     /// \param port is the tunneled port on the remote that the client wants to reach.  (This is
     /// *not* the quic pseudo-port, which is always 0).

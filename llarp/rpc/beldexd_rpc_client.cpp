@@ -351,14 +351,14 @@ namespace llarp
     }
 
     void
-    BeldexdRpcClient::LookupLNSNameHash(
+    BeldexdRpcClient::LookupBNSNameHash(
         dht::Key_t namehash,
         std::function<void(std::optional<service::EncryptedName>)> resultHandler)
     {
-      LogDebug("Looking Up LNS NameHash ", namehash);
+      LogDebug("Looking Up BNS NameHash ", namehash);
       const nlohmann::json req{{"type", 2}, {"name_hash", namehash.ToHex()}};
       Request(
-          "rpc.lns_resolve",
+          "rpc.bns_resolve",
           [this, resultHandler](bool success, std::vector<std::string> data) {
             std::optional<service::EncryptedName> maybe = std::nullopt;
             if (success)
@@ -380,7 +380,7 @@ namespace llarp
               }
               catch (std::exception& ex)
               {
-                LogError("failed to parse response from lns lookup: ", ex.what());
+                LogError("failed to parse response from bns lookup: ", ex.what());
               }
             }
             if (auto r = m_Router.lock())

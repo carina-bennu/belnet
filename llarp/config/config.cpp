@@ -536,7 +536,7 @@ namespace llarp
 
           if (service::NameIsValid(arg))
           {
-            m_LNSExitMap.Insert(range, arg);
+            m_BNSExitMap.Insert(range, arg);
             return;
           }
 
@@ -576,7 +576,7 @@ namespace llarp
 
           if (service::NameIsValid(exit_str))
           {
-            m_LNSExitAuths.emplace(exit_str, auth);
+            m_BNSExitAuths.emplace(exit_str, auth);
             return;
           }
 

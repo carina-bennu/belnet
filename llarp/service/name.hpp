@@ -13,7 +13,7 @@ namespace llarp::service
     Decrypt(std::string_view name) const;
   };
 
-  /// check if an lns name complies with the registration rules
+  /// check if an bns name complies with the registration rules
   bool
   NameIsValid(std::string_view name);
 
