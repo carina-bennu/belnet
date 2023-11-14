@@ -1,0 +1,13 @@
+ExecWait '$INSTDIR\bin\belnet.exe --install'
+ExecWait '$INSTDIR\bin\belnet.exe -g C:\ProgramData\belnet\belnet.ini'
+CopyFiles '$INSTDIR\share\bootstrap.signed' C:\ProgramData\belnet\bootstrap.signed
+
+ifFileExists $INSTDIR\share\conf.d 0 +3
+CreateDirectory C:\ProgramData\belnet\conf.d
+CopyFiles '$INSTDIR\share\conf.d\*.ini' C:\ProgramData\belnet\conf.d
+
+IfFileExists $INSTDIR\bin\WinDivert64.sys +2 0
+CopyFiles '$INSTDIR\lib\WinDivert64.sys' '$INSTDIR\bin\WinDivert64.sys'
+
+IfFileExists $INSTDIR\bin\WinDivert.sys +2 0
+CopyFiles '$INSTDIR\lib\WinDivert.sys' '$INSTDIR\bin\WinDivert.sys'

@@ -26,7 +26,7 @@ namespace llarp::iwp
       , m_Inbound{allowInbound}
   {}
 
-  const char*
+  std::string_view
   LinkLayer::Name() const
   {
     return "iwp";
@@ -82,22 +82,7 @@ namespace llarp::iwp
       WakeupPlaintext();
     }
   }
-
-  bool
-  LinkLayer::MapAddr(const RouterID& r, ILinkSession* s)
-  {
-    if (not ILinkLayer::MapAddr(r, s))
-      return false;
-    m_AuthedAddrs.emplace(s->GetRemoteEndpoint(), r);
-    return true;
-  }
-
-  void
-  LinkLayer::UnmapAddr(const SockAddr& addr)
-  {
-    m_AuthedAddrs.erase(addr);
-  }
-
+  
   std::shared_ptr<ILinkSession>
   LinkLayer::NewOutboundSession(const RouterContact& rc, const AddressInfo& ai)
   {

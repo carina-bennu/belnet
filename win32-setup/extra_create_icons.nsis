@@ -1,0 +1,1 @@
+CreateShortCut '$SMPROGRAMS\$STARTMENU_FOLDER\Belnet.lnk' '$INSTDIR\share\gui\belnet-gui.exe'

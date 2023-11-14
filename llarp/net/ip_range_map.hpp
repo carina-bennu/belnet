@@ -9,9 +9,8 @@ namespace llarp
   namespace net
   {
     /// a container that maps an ip range to a value that allows you to lookup
-    /// key by range hit
-    /// TODO: do some kind of magic shit to ensure near constant time for
-    /// lookups
+    /// key by range hit 
+    
     template <typename Value_t>
     struct IPRangeMap
     {

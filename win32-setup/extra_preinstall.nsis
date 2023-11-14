@@ -1,0 +1,5 @@
+ExecWait 'taskkill /f /t /im belnet-gui.exe'
+
+IfFileExists $INSTDIR\bin\belnet.exe 0 +3
+ExecWait 'net stop belnet'
+ExecWait '$INSTDIR\bin\belnet.exe --remove'

@@ -43,7 +43,7 @@ You can install these using:
 
 If you are not on a platform supported by the debian packages or if you want to build a dev build, this is the most "portable" way to do it:
 
-    $ sudo apt install build-essential cmake git libcap-dev pkg-config automake libtool libuv1-dev libsodium-dev libzmq3-dev libcurl4-openssl-dev libevent-dev nettle-dev libunbound-dev libsqlite3-dev
+    $ sudo apt install build-essential cmake git libcap-dev pkg-config automake libtool libuv1-dev libsodium-dev libzmq3-dev libcurl4-openssl-dev libevent-dev nettle-dev libunbound-dev libsqlite3-dev libssl-dev
     $ git clone --recursive https://github.com/Beldex-Coin/belnet
     $ cd belnet
     $ mkdir build
@@ -59,6 +59,26 @@ If you dont want to do a static build install the dependancies and run:
 install:
 
     $ sudo make install
+
+
+supported cross targets:
+
+* aarch64
+* armhf
+* mips
+* mips64
+* mipsel
+* ppc64le
+
+install the toolchain for `$arch` this example is `aarch64`
+
+    $ sudo apt install g{cc,++}-aarch64-linux-gnu
+
+build 1 or many cross targets:
+
+    $ ./contrib/cross.sh arch_1 arch_2 ... arch_n    
+
+    
 
 ### macOS
 

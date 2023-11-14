@@ -80,12 +80,12 @@ BEGIN
             VALUE "Comments", "BelNET test suite"
             VALUE "CompanyName", "Beldex Foundation"
             VALUE "FileDescription", "BelNET for Microsoft� Windows� NT�"
-            VALUE "FileVersion", VERSION_STRING(LLARP_VERSION_TRIPLET, LLARP_RELEASE_MOTTO, VERSIONTAG)
+            VALUE "FileVersion", "@belnet_VERSION@"
             VALUE "InternalName", "llarpd"
-            VALUE "LegalCopyright", "Copyright �2018-2020 Jeff Becker, Rick V for the Beldex Foundation. All rights reserved. This software is provided under the terms of the zlib-libpng licence; see the file LICENSE for details."
+            VALUE "LegalCopyright", "Copyright �2018-2020 Beldex Foundation. All rights reserved. This software is provided under the terms of the zlib-libpng licence; see the file LICENSE for details."
             VALUE "OriginalFilename", "llarpd.exe"
-            VALUE "ProductName", "BelNET for Windows"
-            VALUE "ProductVersion", VERSION_STRING(LLARP_VERSION_TRIPLET, LLARP_RELEASE_MOTTO, VERSIONTAG)
+            VALUE "ProductName", "belnet_EXE_NAME@"
+            VALUE "ProductVersion", "@belnet_VERSION@"
         END
     END
     BLOCK "VarFileInfo"

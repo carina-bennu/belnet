@@ -3,14 +3,17 @@ if (NOT DOXYGEN)
     message(STATUS "Documentation generation disabled (doxygen not found)")
     return()
 endif()
-find_program(SPHINX_BUILD sphinx-build)
-if (NOT SPHINX_BUILD)
-    message(STATUS "Documentation generation disabled (sphinx-build not found)")
+find_program(MKDOCS mkdocs)
+if (NOT MKDOCS)
+    message(STATUS "Documentation generation disabled (mkdocs not found)")
     return()
-  endif()
+endif()
   
 set(belnet_doc_sources "${DOCS_SRC}")
 string(REPLACE ";" " " belnet_doc_sources_spaced "${belnet_doc_sources}")
+
+add_custom_target(clean_xml COMMAND ${CMAKE_COMMAND} -E rm -rf doxyxml)
+add_custom_target(clean_markdown COMMAND ${CMAKE_COMMAND} -E rm -rf markdown)
 
 add_custom_command(
     OUTPUT doxyxml/index.xml
@@ -20,20 +23,62 @@ add_custom_command(
         ${belnet_doc_sources}
 )
 
+# find doxybook2
+find_program(DOXYBOOK2 doxybook2)
+if(NOT DOXYBOOK2)
+  if(NOT DOXYBOOK2_ZIP_URL)
+    set(DOXYBOOK2_VERSION v1.4.0 CACHE STRING "doxybook2 version")
+    set(DOXYBOOK2_ZIP_URL "https://github.com/matusnovak/doxybook2/releases/download/${DOXYBOOK2_VERSION}/doxybook2-linux-amd64-${DOXYBOOK2_VERSION}.zip")
+  endif()
+
+
+
+
+file(DOWNLOAD
+    ${DOXYBOOK2_ZIP_URL}
+    ${CMAKE_CURRENT_BINARY_DIR}/doxybook2.zip
+    ${DOXYBOOK2_ZIP_HASH_OPTS})
+
+execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${CMAKE_CURRENT_BINARY_DIR}/doxybook2.zip
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set(DOXYBOOK2 ${CMAKE_CURRENT_BINARY_DIR}/bin/doxybook2)
+  set(doxybook_localbin ${DOXYBOOK2})
+endif()
+
+
 add_custom_command(
-    OUTPUT html/index.html
-    COMMAND ${SPHINX_BUILD} -j auto
-        -Dbreathe_projects.belnet=${CMAKE_CURRENT_BINARY_DIR}/doxyxml
-        -Dversion=${belnet_VERSION} -Drelease=${belnet_VERSION}
-        -Aversion=${belnet_VERSION} -Aversions=${belnet_VERSION_MAJOR},${belnet_VERSION_MINOR},${belnet_VERSION_PATCH}
-        -b html
-        ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/html
+    OUTPUT gen
+    COMMAND ${DOXYBOOK2} --input ${CMAKE_CURRENT_BINARY_DIR}/doxyxml --output ${CMAKE_CURRENT_BINARY_DIR}/gen --config config.json
     DEPENDS
-        ${CMAKE_CURRENT_BINARY_DIR}/index.rst
-        ${CMAKE_CURRENT_BINARY_DIR}/conf.py
-        ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml
+    ${doxybook_localbin}
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/index.md
+    ${CMAKE_CURRENT_BINARY_DIR}/config.json
+    ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml)
+
+add_custom_target(clean_html COMMAND ${CMAKE_COMMAND} -E rm -rf html)
+
+add_custom_command(
+  OUTPUT markdown
+  COMMAND find ${CMAKE_CURRENT_BINARY_DIR}/gen/ -type f -name '*.md' -exec ${CMAKE_CURRENT_SOURCE_DIR}/fix-markdown.sh {} "\;" && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/gen ${CMAKE_CURRENT_BINARY_DIR}/markdown
+  DEPENDS gen
 )
-add_custom_target(doc DEPENDS html/index.html)
-configure_file(conf.py.in conf.py @ONLY)
+
+add_custom_command(
+  OUTPUT html
+  COMMAND ${MKDOCS} build
+  DEPENDS
+  clean_html
+  ${CMAKE_CURRENT_BINARY_DIR}/markdown)
+
+add_custom_target(doc DEPENDS markdown)
+
+# we seperate this step out so we force clean_markdown to run before markdown target
+add_custom_command(
+  OUTPUT gen/index.md
+  COMMAND ${CMAKE_COMMAND} -E copy index.md gen/index.md
+  DEPENDS clean_markdown)
+  
 configure_file(Doxyfile.in Doxyfile @ONLY)
-configure_file(index.rst index.rst COPYONLY)
+configure_file(config.json config.json @ONLY)
+configure_file(mkdocs.yml mkdocs.yml @ONLY)
+configure_file(index.md.in index.md @ONLY)
