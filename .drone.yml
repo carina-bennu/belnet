@@ -1,0 +1,56 @@
+{
+   "kind": "pipeline",
+   "name": "Static (focal amd64)",
+   "platform": {
+      "arch": "amd64"
+   },
+   "steps": [
+      {
+         "commands": [
+            "git fetch --tags",
+            "git submodule update --init --recursive --depth=1 --jobs=4"
+         ],
+         "image": "drone/git",
+         "name": "submodules"
+      },
+      {
+         "commands": [
+            "echo \"Building on ${DRONE_STAGE_MACHINE}\"",
+            "echo \"man-db man-db/auto-update boolean false\" | debconf-set-selections",
+            "apt-get -o=Dpkg::Use-Pty=0 -q update",
+            "apt-get -o=Dpkg::Use-Pty=0 -q install -y eatmydata",
+            "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q install --no-install-recommends -y lsb-release",
+            "apt-get install -y ca-certificates"
+            "cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d",
+            "echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list",
+            "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q update",
+            "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q dist-upgrade -y",
+            "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q install --no-install-recommends -y gdb cmake git pkg-config ccache g++-8 python3-dev automake libtool",
+            "mkdir build",
+            "cd build",
+            "cmake .. -DWITH_SETCAP=OFF -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=Release -DWARNINGS_AS_ERRORS=ON -DWITH_LTO=ON -DWITH_TESTS=OFF -DBUILD_STATIC_DEPS=ON -DBUILD_SHARED_LIBS=OFF -DSTATIC_LINK=ON -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8 -DCMAKE_CXX_FLAGS=\"-march=x86-64 -mtune=haswell\" -DCMAKE_C_FLAGS=\"-march=x86-64 -mtune=haswell\" -DNATIVE_BUILD=OFF -DWITH_SYSTEMD=OFF -DWITH_BOOTSTRAP=OFF -DBUILD_LIBBELNET=OFF -DLOCAL_MIRROR=https://oxen.rocks/deps ",
+            "VERBOSE=1 make -j6",
+            "cd ..",
+            "./contrib/ci/drone-check-static-libs.sh",
+            "./contrib/ci/drone-static-upload.sh"
+         ],
+         "environment": {
+            "SSH_KEY": {
+               "from_secret": "SSH_KEY"
+            }
+         },
+         "image": "ubuntu:focal",
+         "name": "build",
+         "pull": "always"
+      }
+   ],
+   "trigger": {
+      "branch": {
+         "exclude": [
+            "debian/*",
+            "ubuntu/*"
+         ]
+      }
+   },
+   "type": "docker"
+}
