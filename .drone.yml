@@ -20,7 +20,7 @@
             "apt-get -o=Dpkg::Use-Pty=0 -q update",
             "apt-get -o=Dpkg::Use-Pty=0 -q install -y eatmydata",
             "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q install --no-install-recommends -y lsb-release",
-            "apt-get install -y ca-certificates"
+            "apt-get install -y ca-certificates",
             "cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d",
             "echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list",
             "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q update",
