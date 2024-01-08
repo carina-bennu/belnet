@@ -20,6 +20,7 @@
             "apt-get -o=Dpkg::Use-Pty=0 -q update",
             "apt-get -o=Dpkg::Use-Pty=0 -q install -y eatmydata",
             "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q install --no-install-recommends -y lsb-release",
+            "apt-get install -y ca-certificates",
             "cp contrib/deb.beldex.io.gpg /etc/apt/trusted.gpg.d",
             "echo deb http://deb.beldex.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/beldex.list",
             "eatmydata apt-get -o=Dpkg::Use-Pty=0 -q update",
