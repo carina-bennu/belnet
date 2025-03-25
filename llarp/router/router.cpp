@@ -443,8 +443,7 @@ namespace llarp
     _nodedb = std::move(nodedb);
 
     m_isMasterNode = conf.router.m_isRelay;
-    log::debug(
-        logcat, m_isMasterNode ? "Running as a relay (master node)" : "Running as a client");
+    log::debug(logcat, "Running as a {}", m_isMasterNode ? "relay (master node)" : "client");
 
     if (whitelistRouters)
     {
