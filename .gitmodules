@@ -36,6 +36,7 @@
 [submodule "external/oxen-logging"]
 	path = external/oxen-logging
 	url = https://github.com/oxen-io/oxen-logging.git
+	ignore = dirty
 [submodule "gui"]
 	path = gui
 	url = https://github.com/Beldex-Coin/belnet-gui
