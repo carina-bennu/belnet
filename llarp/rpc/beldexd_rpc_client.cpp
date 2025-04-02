@@ -129,7 +129,7 @@ namespace llarp
            }},
       };
       if (!m_LastUpdateHash.empty())
-        request["fields"]["poll_block_hash"] = m_LastUpdateHash;
+        request["poll_block_hash"] = m_LastUpdateHash;
       Request(
           "rpc.get_master_nodes",
           [self = shared_from_this()](bool success, std::vector<std::string> data) {
