@@ -388,7 +388,7 @@ namespace llarp
       }
     }
 
-    using vector_t = std::conditional_t<std::ranges::same_as<bool, T>, std::list<T>, std::vector<T>>;
+    using vector_t = std::conditional_t<std::same_as<bool, T>, std::list<T>, std::vector<T>>;
     vector_t defaultValues;
     vector_t parsedValues;
     std::function<void(T)> acceptor;
