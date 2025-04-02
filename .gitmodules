@@ -29,10 +29,6 @@
 [submodule "external/ngtcp2"]
 	path = external/ngtcp2
 	url = https://github.com/ngtcp2/ngtcp2.git
-[submodule "external/oxen-encoding"]
-	path = external/oxen-encoding
-	url = https://github.com/oxen-io/oxen-encoding.git
-	ignore = dirty
 [submodule "external/oxen-logging"]
 	path = external/oxen-logging
 	url = https://github.com/oxen-io/oxen-logging.git
@@ -41,3 +37,6 @@
 	path = gui
 	url = https://github.com/Beldex-Coin/belnet-gui
 	ignore = dirty
+[submodule "external/oxen-encoding"]
+	path = external/oxen-encoding
+	url = https://github.com/session-foundation/oxen-encoding.git

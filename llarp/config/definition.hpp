@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <memory>
+#include <list>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -311,7 +312,7 @@ namespace llarp
       if (not multiValued and parsedValues.size() > 0)
       {
         throw std::invalid_argument{
-            fmt::format("duplicate value for {}, previous value: {}", name, parsedValues[0])};
+            fmt::format("duplicate value for {}, previous value: {}", name, parsedValues.front())};
       }
 
       parsedValues.emplace_back(fromString(input));
@@ -387,8 +388,9 @@ namespace llarp
       }
     }
 
-    std::vector<T> defaultValues;
-    std::vector<T> parsedValues;
+    using vector_t = std::conditional_t<std::ranges::same_as<bool, T>, std::list<T>, std::vector<T>>;
+    vector_t defaultValues;
+    vector_t parsedValues;
     std::function<void(T)> acceptor;
   };
 
