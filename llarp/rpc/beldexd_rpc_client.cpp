@@ -182,6 +182,13 @@ namespace llarp
 
         pk = r->pubkey();
 
+        PubKey zeroKey{};
+
+        if (pk==zeroKey){
+          LogDebug("Got Null Public Key : ",pk.ToString());
+          return;
+        }
+
         nlohmann::json payload = {
             {"pubkey_ed25519", oxenc::to_hex(pk.begin(), pk.end())},
             {"version", {VERSION[0], VERSION[1], VERSION[2]}}};

@@ -606,7 +606,7 @@ namespace llarp
       const ShortHash expected{buf.base};
       if (H != expected)
       {
-        LogError(
+        LogDebug(
             m_Parent->PrintableName(),
             " keyed hash mismatch ",
             H,
@@ -976,7 +976,7 @@ namespace llarp
             }
             else
             {
-              LogWarn("bad intro from ", m_RemoteAddr);
+              LogDebug("bad intro from ", m_RemoteAddr);
               return false;
             }
           }
