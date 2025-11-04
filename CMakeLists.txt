@@ -24,7 +24,7 @@ endif()
 
 
 project(belnet
-    VERSION 0.9.7
+    VERSION 0.9.8
     DESCRIPTION "belnet - IP packet onion router"
     LANGUAGES ${LANGS})
 
