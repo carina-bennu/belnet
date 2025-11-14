@@ -38,7 +38,7 @@ namespace llarp
       }
 
       void
-      LookupLNSNameHash(
+      LookupBNSNameHash(
           dht::Key_t namehash,
           std::function<void(std::optional<service::EncryptedName>)> resultHandler);
 

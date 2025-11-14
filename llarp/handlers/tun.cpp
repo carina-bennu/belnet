@@ -624,11 +624,11 @@ namespace llarp
       }
       std::string qname = msg.questions[0].Name();
       const auto nameparts = split(qname, ".");
-      std::string lnsName;
+      std::string bnsName;
       if (nameparts.size() >= 2 and ends_with(qname, ".bdx"))
       {
-        lnsName = nameparts[nameparts.size() - 2];
-        lnsName += ".bdx"sv;
+        bnsName = nameparts[nameparts.size() - 2];
+        bnsName += ".bdx"sv;
       }
       if (msg.questions[0].qtype == dns::qTypeTXT)
       {
@@ -694,9 +694,9 @@ namespace llarp
         {
           msg.AddMXReply(qname, 1);
         }
-        else if (service::NameIsValid(lnsName))
+        else if (service::NameIsValid(bnsName))
         {
-          LookupNameAsync(lnsName, [msg, lnsName, reply](auto maybe) mutable {
+          LookupNameAsync(bnsName, [msg, bnsName, reply](auto maybe) mutable {
             if (maybe.has_value())
             {
               var::visit([&](auto&& value) { msg.AddMXReply(value.ToString(), 1); }, *maybe);
@@ -829,19 +829,19 @@ namespace llarp
                 addr.as_array(), std::make_shared<dns::Message>(msg), isV6);
           }
         }
-        else if (service::NameIsValid(lnsName))
+        else if (service::NameIsValid(bnsName))
         {
           LookupNameAsync(
-              lnsName,
+              bnsName,
               [msg = std::make_shared<dns::Message>(msg),
                name = Name(),
-               lnsName,
+               bnsName,
                isV6,
                reply,
                ReplyToDNSWhenReady](auto maybe) {
                 if (not maybe.has_value())
                 {
-                  LogWarn(name, " lns name ", lnsName, " not resolved");
+                  LogWarn(name, " bns name ", bnsName, " not resolved");
                   msg->AddNXReply();
                   reply(*msg);
                   return;

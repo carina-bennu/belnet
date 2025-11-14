@@ -1,18 +1,11 @@
 # Belnet
 
-[Español](readme_es.md) [Русский](readme_ru.md)
+[BelNet](https://belnet.beldex.io/) is an onion routing protocol, an implementation of the Low Latency Anonymous Routing Protocol. BelNet also acts as a decentralized VPN using the masternodes on the [Beldex](https://beldex.io/) Network and exit nodes run by the community. 
 
-Belnet is the reference implementation of LLARP (low latency anonymous routing protocol), a layer 3 onion routing protocol.
+BelNet is censorship-free and can host private applications called MNApps. These apps are web applications hosted using the BelNet address, a randomly generated address with the TLD .bdx
 
-You can learn more about the high level design of LLARP [here](docs/high-level.txt)
+BelNet was developed as a way to promote free speech and aid the free flow of information on the Internet.
 
-And you can read the LLARP protocol specification [here](docs/proto_v0.txt)
-
-You can view documentation on how to get started [here](https://docs.beldex.io/products-built-on-beldex/belnet) .
-
-A simple demo application that is belnet "aware" can be found [here](https://github.com/majestrate/belnet-aware-demos)
-
-[![Build Status](https://ci.beldex.rocks/api/badges/beldex-coin/belnet/status.svg?ref=refs/heads/dev)](https://ci.beldex.rocks/beldex-coin/belnet)
 
 ## Building
 
@@ -156,3 +149,9 @@ The macOS installer places the normal binaries (`belnet` and `belnet-bootstrap`)
 to run, after you create default config:
 
     $ sudo belnet
+
+
+## Credits
+
+ * Copyright © 2018-2023 The Beldex Project
+ * Portions Copyright © 2018-2021 Lokinet

@@ -60,7 +60,7 @@ namespace llarp
       std::optional<dns::SRVData> srv;
       /// address we are bound on
       SockAddr localAddr;
-      /// the remote's lns name if we have one
+      /// the remote's bns name if we have one
       std::optional<std::string> remoteName;
       /// the remote's address
       AddressVariant_t remoteAddr;

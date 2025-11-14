@@ -230,7 +230,7 @@ add_library(belnet-amalgum
   service/info.cpp
   service/intro_set.cpp
   service/intro.cpp
-  service/lns_tracker.cpp
+  service/bns_tracker.cpp
   service/lookup.cpp
   service/name.cpp
   service/outbound_context.cpp

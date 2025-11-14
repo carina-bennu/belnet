@@ -12,8 +12,8 @@
 
 namespace llarp::service
 {
-  /// tracks and manages consensus of lns names we fetch from the network
-  class LNSLookupTracker
+  /// tracks and manages consensus of bns names we fetch from the network
+  class BNSLookupTracker
   {
    public:
     using Addr_t = std::variant<Address, RouterID>;
@@ -40,7 +40,7 @@ namespace llarp::service
     std::unordered_map<std::string, LookupInfo> m_PendingLookups;
 
    public:
-    /// make a function that will handle consensus of an lns request
+    /// make a function that will handle consensus of an bns request
     /// name is the name we are requesting
     /// numPeers is the number of peers we asked
     /// resultHandler is a function that we are wrapping that will handle the final result
