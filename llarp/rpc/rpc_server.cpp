@@ -448,7 +448,7 @@ namespace llarp::rpc
                   return;
                 }
                 std::optional<service::Address> exit;
-                std::optional<std::string> lnsExit;
+                std::optional<std::string> bnsExit;
                 IPRange range;
                 bool map = true;
                 const auto exit_itr = obj.find("exit");
@@ -458,7 +458,7 @@ namespace llarp::rpc
                   const auto exit_str = exit_itr->get<std::string>();
                   if (service::NameIsValid(exit_str) or exit_str == "null")
                   {
-                    lnsExit = exit_str;
+                    bnsExit = exit_str;
                   }
                   else if (not addr.FromString(exit_str))
                   {
@@ -513,14 +513,14 @@ namespace llarp::rpc
                 {
                   endpoint = endpoint_itr->get<std::string>();
                 }
-                r->loop()->call([map, exit, lnsExit, range, token, endpoint, r, reply]() mutable {
+                r->loop()->call([map, exit, bnsExit, range, token, endpoint, r, reply]() mutable {
                   auto ep = r->hiddenServiceContext().GetEndpointByName(endpoint);
                   if (ep == nullptr)
                   {
                     reply(CreateJSONError("no endpoint with name " + endpoint));
                     return;
                   }
-                  if (map and (exit.has_value() or lnsExit.has_value()))
+                  if (map and (exit.has_value() or bnsExit.has_value()))
                   {
                     auto mapExit = [=](service::Address addr) mutable {
                       ep->MapExitRange(range, addr);
@@ -579,9 +579,9 @@ namespace llarp::rpc
                     {
                       mapExit(*exit);
                     }
-                    else if (lnsExit.has_value())
+                    else if (bnsExit.has_value())
                     {
-                      const std::string name = *lnsExit;
+                      const std::string name = *bnsExit;
                       if (name == "null")
                       {
                         service::Address nullAddr{};
@@ -603,14 +603,14 @@ namespace llarp::rpc
                         }
                         else
                         {
-                          reply(CreateJSONError("lns name resolved to a mnode"));
+                          reply(CreateJSONError("bns name resolved to a mnode"));
                         }
                       });
                     }
                     else
                     {
                       reply(
-                          CreateJSONError("WTF inconsistent request, no exit address or lns "
+                          CreateJSONError("WTF inconsistent request, no exit address or bns "
                                           "name provided?"));
                     }
                     return;

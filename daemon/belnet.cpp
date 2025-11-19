@@ -557,7 +557,7 @@ belnet_main(int argc, char** argv)
             "file a bug report now or be cursed with this "
             "annoying image in your syslog for all time."})
       {
-        llarp::log::critical(deadlock_cat, wtf);
+        llarp::log::critical(deadlock_cat, "{}", wtf);
         llarp::log::flush();
       }
       llarp::sys::service_manager->failed();

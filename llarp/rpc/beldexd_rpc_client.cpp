@@ -129,7 +129,7 @@ namespace llarp
            }},
       };
       if (!m_LastUpdateHash.empty())
-        request["fields"]["poll_block_hash"] = m_LastUpdateHash;
+        request["poll_block_hash"] = m_LastUpdateHash;
       Request(
           "rpc.get_master_nodes",
           [self = shared_from_this()](bool success, std::vector<std::string> data) {
@@ -181,6 +181,13 @@ namespace llarp
           return;  // router has gone away, maybe shutting down?
 
         pk = r->pubkey();
+
+        PubKey zeroKey{};
+
+        if (pk==zeroKey){
+          LogDebug("Got Null Public Key : ",pk.ToString());
+          return;
+        }
 
         nlohmann::json payload = {
             {"pubkey_ed25519", oxenc::to_hex(pk.begin(), pk.end())},
@@ -351,14 +358,14 @@ namespace llarp
     }
 
     void
-    BeldexdRpcClient::LookupLNSNameHash(
+    BeldexdRpcClient::LookupBNSNameHash(
         dht::Key_t namehash,
         std::function<void(std::optional<service::EncryptedName>)> resultHandler)
     {
-      LogDebug("Looking Up LNS NameHash ", namehash);
+      LogDebug("Looking Up BNS NameHash ", namehash);
       const nlohmann::json req{{"type", 2}, {"name_hash", namehash.ToHex()}};
       Request(
-          "rpc.lns_resolve",
+          "rpc.bns_resolve",
           [this, resultHandler](bool success, std::vector<std::string> data) {
             std::optional<service::EncryptedName> maybe = std::nullopt;
             if (success)
@@ -380,7 +387,7 @@ namespace llarp
               }
               catch (std::exception& ex)
               {
-                LogError("failed to parse response from lns lookup: ", ex.what());
+                LogError("failed to parse response from bns lookup: ", ex.what());
               }
             }
             if (auto r = m_Router.lock())

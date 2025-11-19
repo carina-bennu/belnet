@@ -536,7 +536,7 @@ namespace llarp
 
           if (service::NameIsValid(arg))
           {
-            m_LNSExitMap.Insert(range, arg);
+            m_BNSExitMap.Insert(range, arg);
             return;
           }
 
@@ -576,7 +576,7 @@ namespace llarp
 
           if (service::NameIsValid(exit_str))
           {
-            m_LNSExitAuths.emplace(exit_str, auth);
+            m_BNSExitAuths.emplace(exit_str, auth);
             return;
           }
 
@@ -1191,6 +1191,7 @@ namespace llarp
         "beldexd",
         "rpc",
         RelayOnly,
+        Required,
         Comment{
             "oxenmq control address for for communicating with beldexd. Depends on beldexd's",
             "lmq-local-control configuration option. By default this value should be",
@@ -1397,7 +1398,7 @@ namespace llarp
         {
           ConfigParser parser;
           if (not parser.LoadFile(overrideFile))
-            throw std::runtime_error{"cannot load '" + overrideFile.u8string() + "'"};
+            throw std::runtime_error{fmt::format("cannot load '{}'", overrideFile)};
 
           parser.IterAll([&](std::string_view section, const SectionValues_t& values) {
             for (const auto& pair : values)
