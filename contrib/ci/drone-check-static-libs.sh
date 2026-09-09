@@ -6,12 +6,12 @@
 set -o errexit
 
 bad=
-if [ "$DRONE_STAGE_OS" == "darwin" ]; then
+if [ "$DRONE_STAGE_OS" == "macOS" ]; then
     if otool -L llarp/apple/org.belnet.network-extension.systemextension/Contents/MacOS/org.belnet.network-extension | \
         grep -Ev '^llarp/apple:|^\t(/usr/lib/lib(System\.|c\+\+|objc))|/System/Library/Frameworks/(CoreFoundation|NetworkExtension|Foundation|Network)\.framework'; then
         bad=1
     fi
-elif [ "$DRONE_STAGE_OS" == "linux" ]; then
+elif [ "$DRONE_STAGE_OS" == "Linux" ]; then
     if ldd daemon/belnet | grep -Ev '(linux-vdso|ld-linux-(x86-64|armhf|aarch64)|lib(pthread|dl|rt|stdc\+\+|gcc_s|c|m))\.so'; then
         bad=1
     fi
